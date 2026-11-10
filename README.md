@@ -2,6 +2,11 @@
 
 Connects a **Refined Storage 2** network to **Create 6**'s logistics system (NeoForge 1.21.1).
 
+## Disclaimer
+This was 100% vibe coded using claude code. I do know how to code and have written Minecraft mods in the past.
+All code was reviewed by me and I am perfectly capable of fixing any bugs that may arise.
+This was my first dip into utilizing AI as a coding tool.
+
 ## How to use
 
 1. Place a **Logistics Bridge** so that it touches your RS network (directly or via cable). Its sides light up once
