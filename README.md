@@ -34,3 +34,9 @@ network through it.
 ```
 
 Dependencies: Create 6.0.10+, Refined Storage 2.0.9+.
+
+## License
+
+Refined Creation is licensed under the GNU Lesser General Public License v3.0 or later (LGPL-3.0-or-later). See [COPYING.LESSER](COPYING.LESSER) and [COPYING](COPYING) (the GPLv3, which the LGPL supplements).
+
+Files derived from the NeoForged MDK template remain under the MIT license in [TEMPLATE_LICENSE.txt](TEMPLATE_LICENSE.txt).
