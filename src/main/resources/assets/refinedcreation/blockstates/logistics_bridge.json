@@ -1,0 +1,6 @@
+{
+  "variants": {
+    "enabled=false": { "model": "refinedcreation:block/logistics_bridge_inactive" },
+    "enabled=true": { "model": "refinedcreation:block/logistics_bridge_active" }
+  }
+}

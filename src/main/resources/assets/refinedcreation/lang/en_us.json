@@ -1,0 +1,8 @@
+{
+  "block.refinedcreation.logistics_bridge": "Logistics Bridge",
+
+  "refinedcreation.configuration.title": "Refined Creation Configs",
+  "refinedcreation.configuration.section.refinedcreation.common.toml": "Refined Creation Configs",
+  "refinedcreation.configuration.section.refinedcreation.common.toml.title": "Refined Creation Configs",
+  "refinedcreation.configuration.bridgeEnergyUsage": "Logistics Bridge Energy Usage"
+}

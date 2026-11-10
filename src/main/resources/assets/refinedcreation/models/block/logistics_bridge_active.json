@@ -1,0 +1,9 @@
+{
+  "parent": "refinedcreation:block/emissive_side_overlay",
+  "textures": {
+    "side": "refinedcreation:block/logistics_bridge/side",
+    "end": "refinedcreation:block/logistics_bridge/end",
+    "overlay": "refinedcreation:block/logistics_bridge/side_active_overlay",
+    "particle": "refinedcreation:block/logistics_bridge/side"
+  }
+}
