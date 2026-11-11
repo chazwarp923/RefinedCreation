@@ -24,6 +24,28 @@ You get:
 The bridge also works as a plain inventory for funnels, chutes and hoppers: they can pull from and push into the
 network through it.
 
+## Autocrafting with Create factories
+
+The **Logistics Dispatcher** lets Refined Storage autocrafting use a Create factory to process ingredients.
+
+1. Set up a Logistics Bridge as above. Its Packager's address is where results come back.
+2. Place an RS **Autocrafter** facing a **Logistics Dispatcher**, and put the external (processing) patterns in it.
+3. Place a Create **Packager** against the dispatcher, facing *away* from it, and put a sign on the Packager with the
+   address of your factory.
+4. Have your factory send its output as a package addressed to the bridge's Packager.
+
+When RS runs one of those patterns, the dispatcher packs the ingredients for each crafting step and the Packager
+sends them to the factory. When the result package is unpacked through the bridge, RS counts it toward the task
+like any other external pattern output.
+
+- Patterns may only use items. Patterns containing fluids are rejected, because packages can't carry fluids.
+- Ingredients are split across several packages if they don't fit in one (9 stacks; bulky items travel alone).
+- The dispatcher stops taking work while its Packager has `dispatcherMaxQueuedPackages` (default 10) packages queued.
+  The Autocrafter's "lock until connected machine is empty" mode waits for the Packager's queue to clear.
+- If the factory never sends the result back, the RS task waits until you cancel it, as with any external pattern.
+- Don't point an Autocrafter at the Logistics Bridge itself. It would just push the ingredients back into the
+  network.
+
 ## Notes
 
 - Uses RS energy (`bridgeEnergyUsage` in `config/refinedcreation-common.toml`, default 8/tick).
@@ -35,7 +57,7 @@ network through it.
 
 ```
 ./gradlew build              # jar in build/libs
-./gradlew runGameTestServer  # runs the integration test (RS network + bridge + Create packager round trip)
+./gradlew runGameTestServer  # runs the integration tests (bridge packager round trip; autocrafting via dispatcher)
 ```
 
 Dependencies: Create 6.0.10+, Refined Storage 2.0.9+.

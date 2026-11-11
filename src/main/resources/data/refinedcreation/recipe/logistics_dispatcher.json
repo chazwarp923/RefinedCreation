@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "BTB",
+    "RMR",
+    "BPB"
+  ],
+  "key": {
+    "B": { "item": "create:brass_ingot" },
+    "T": { "item": "create:transmitter" },
+    "P": { "item": "create:precision_mechanism" },
+    "R": { "item": "refinedstorage:pattern" },
+    "M": { "item": "refinedstorage:machine_casing" }
+  },
+  "result": { "id": "refinedcreation:logistics_dispatcher", "count": 1 }
+}

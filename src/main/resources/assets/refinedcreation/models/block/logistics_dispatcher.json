@@ -1,0 +1,9 @@
+{
+  "parent": "minecraft:block/cube_bottom_top",
+  "textures": {
+    "side": "refinedcreation:block/logistics_dispatcher/side",
+    "top": "refinedcreation:block/logistics_dispatcher/end",
+    "bottom": "refinedcreation:block/logistics_dispatcher/end",
+    "particle": "refinedcreation:block/logistics_dispatcher/side"
+  }
+}

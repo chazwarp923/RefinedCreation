@@ -38,6 +38,14 @@ public class LogisticsBridgeBlockEntity extends AbstractNetworkNodeContainerBloc
     }
 
     /**
+     * @return the network the bridge is connected to, or {@code null}
+     */
+    @Nullable
+    public Network getNetwork() {
+        return mainNetworkNode.getNetwork();
+    }
+
+    /**
      * @return the network's storage, or {@code null} if the bridge is not connected or not powered
      */
     @Nullable

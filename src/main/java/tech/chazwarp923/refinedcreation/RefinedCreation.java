@@ -18,6 +18,7 @@ import net.neoforged.neoforge.capabilities.Capabilities;
 import net.neoforged.neoforge.capabilities.RegisterCapabilitiesEvent;
 import net.neoforged.neoforge.event.BuildCreativeModeTabContentsEvent;
 import tech.chazwarp923.refinedcreation.bridge.NetworkUnpackingHandler;
+import tech.chazwarp923.refinedcreation.dispatcher.DispatcherSinkFactory;
 import tech.chazwarp923.refinedcreation.registry.ModBlockEntities;
 import tech.chazwarp923.refinedcreation.registry.ModBlocks;
 
@@ -29,6 +30,10 @@ import tech.chazwarp923.refinedcreation.registry.ModBlocks;
  * Stock Link to the Packager: every item in the RS network then shows up in Stock Keepers and Factory Gauges on
  * that logistics frequency, requested items are pulled out of the network and packaged, and packages delivered to
  * that Packager are unpacked straight into the network.
+ * <p>
+ * The {@link ModBlocks#LOGISTICS_DISPATCHER Logistics Dispatcher} goes the other way for autocrafting: an RS
+ * Autocrafter facing it ships its external pattern's ingredients as a package to a Create factory, and the
+ * factory's result package returns through a bridge to complete the RS task.
  */
 @Mod(RefinedCreation.MODID)
 public class RefinedCreation {
@@ -48,8 +53,11 @@ public class RefinedCreation {
 
     private void commonSetup(FMLCommonSetupEvent event) {
         // Create's default unpacker assumes a real slotted inventory; the bridge inserts into the network directly.
-        event.enqueueWork(() -> UnpackingHandler.REGISTRY.register(ModBlocks.LOGISTICS_BRIDGE.get(),
-                NetworkUnpackingHandler.INSTANCE));
+        event.enqueueWork(() -> {
+            UnpackingHandler.REGISTRY.register(ModBlocks.LOGISTICS_BRIDGE.get(), NetworkUnpackingHandler.INSTANCE);
+            // Autocrafters facing a Logistics Dispatcher send their ingredients out as Create packages.
+            RefinedStorageApi.INSTANCE.addPatternProviderExternalPatternSinkFactory(DispatcherSinkFactory.INSTANCE);
+        });
     }
 
     private void registerCapabilities(RegisterCapabilitiesEvent event) {
@@ -71,6 +79,7 @@ public class RefinedCreation {
                 RefinedStorageApi.INSTANCE.getCreativeModeTabId());
         if (event.getTabKey().equals(rsTab)) {
             event.accept(ModBlocks.LOGISTICS_BRIDGE_ITEM);
+            event.accept(ModBlocks.LOGISTICS_DISPATCHER_ITEM);
         }
     }
 }

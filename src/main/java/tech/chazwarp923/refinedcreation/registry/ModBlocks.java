@@ -10,6 +10,7 @@ import net.neoforged.neoforge.registries.DeferredItem;
 import net.neoforged.neoforge.registries.DeferredRegister;
 import tech.chazwarp923.refinedcreation.RefinedCreation;
 import tech.chazwarp923.refinedcreation.bridge.LogisticsBridgeBlock;
+import tech.chazwarp923.refinedcreation.dispatcher.LogisticsDispatcherBlock;
 
 public final class ModBlocks {
     private static final DeferredRegister.Blocks BLOCKS = DeferredRegister.createBlocks(RefinedCreation.MODID);
@@ -26,6 +27,18 @@ public final class ModBlocks {
 
     public static final DeferredItem<BlockItem> LOGISTICS_BRIDGE_ITEM =
             ITEMS.registerSimpleBlockItem("logistics_bridge", LOGISTICS_BRIDGE);
+
+    public static final DeferredBlock<LogisticsDispatcherBlock> LOGISTICS_DISPATCHER = BLOCKS.registerBlock(
+            "logistics_dispatcher",
+            LogisticsDispatcherBlock::new,
+            BlockBehaviour.Properties.of()
+                    .mapColor(MapColor.COLOR_YELLOW)
+                    .strength(1.9F, 1.9F)
+                    .sound(SoundType.METAL)
+                    .requiresCorrectToolForDrops());
+
+    public static final DeferredItem<BlockItem> LOGISTICS_DISPATCHER_ITEM =
+            ITEMS.registerSimpleBlockItem("logistics_dispatcher", LOGISTICS_DISPATCHER);
 
     private ModBlocks() {
     }
