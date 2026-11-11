@@ -52,6 +52,8 @@ public class NetworkItemHandler extends VersionedInventoryWrapper {
      * the bridge. Without it, such a setup would recurse forever.
      */
     private boolean busy;
+    @Nullable
+    private BridgeCrafting crafting;
 
     /**
      * @param storageSupplier  the network's storage, or {@code null} while the bridge is disconnected or inactive
@@ -250,6 +252,25 @@ public class NetworkItemHandler extends VersionedInventoryWrapper {
     @Override
     public void setStackInSlot(int slot, ItemStack stack) {
         // Intentionally a no-op.
+    }
+
+    /**
+     * @return the bridge's autocrafting support, which the Create mixins reach through the Packager's target inventory
+     */
+    @Nullable
+    public BridgeCrafting getCrafting() {
+        return crafting;
+    }
+
+    void setCrafting(BridgeCrafting crafting) {
+        this.crafting = crafting;
+    }
+
+    /**
+     * Makes Packagers rebuild their stock summary even though the stored items didn't change.
+     */
+    void invalidateSummary() {
+        incrementVersion();
     }
 
     /**

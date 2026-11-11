@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "tech.chazwarp923.refinedcreation.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "PackagerBlockEntityMixin",
+    "PackagerLinkBlockEntityMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

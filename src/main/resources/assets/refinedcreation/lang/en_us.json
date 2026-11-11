@@ -6,5 +6,7 @@
   "refinedcreation.configuration.section.refinedcreation.common.toml": "Refined Creation Configs",
   "refinedcreation.configuration.section.refinedcreation.common.toml.title": "Refined Creation Configs",
   "refinedcreation.configuration.bridgeEnergyUsage": "Logistics Bridge Energy Usage",
-  "refinedcreation.configuration.dispatcherMaxQueuedPackages": "Logistics Dispatcher Max Queued Packages"
+  "refinedcreation.configuration.dispatcherMaxQueuedPackages": "Logistics Dispatcher Max Queued Packages",
+  "refinedcreation.configuration.bridgeAutocrafting": "Logistics Bridge Autocrafting",
+  "refinedcreation.configuration.bridgeCraftingTimeoutTicks": "Logistics Bridge Crafting Timeout (ticks)"
 }

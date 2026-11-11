@@ -17,9 +17,14 @@ import com.refinedmods.refinedstorage.common.content.DataComponents;
 import com.refinedmods.refinedstorage.common.content.Items;
 import com.refinedmods.refinedstorage.common.support.resource.ItemResource;
 import com.simibubi.create.AllBlocks;
+import com.simibubi.create.content.logistics.BigItemStack;
 import com.simibubi.create.content.logistics.box.PackageItem;
 import com.simibubi.create.content.logistics.packager.PackagerBlock;
 import com.simibubi.create.content.logistics.packager.PackagerBlockEntity;
+import com.simibubi.create.content.logistics.packagerLink.LogisticallyLinkedBehaviour.RequestType;
+import com.simibubi.create.content.logistics.packagerLink.LogisticsManager;
+import com.simibubi.create.content.logistics.packagerLink.PackagerLinkBlockEntity;
+import com.simibubi.create.content.logistics.stockTicker.PackageOrderWithCrafts;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -35,6 +40,8 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.SignBlockEntity;
 import net.minecraft.world.level.block.entity.SignText;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.AttachFace;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.Property;
 import net.neoforged.neoforge.capabilities.Capabilities;
 import net.neoforged.neoforge.gametest.GameTestHolder;
@@ -59,8 +66,11 @@ public class LogisticsDispatcherTests {
     private static final BlockPos DISPATCHER = new BlockPos(1, 1, 0);
     private static final BlockPos DISPATCHER_PACKAGER = new BlockPos(2, 1, 0);
     private static final BlockPos SIGN = new BlockPos(2, 2, 0);
+    // On top of the bridge packager, connecting downwards into it.
+    private static final BlockPos STOCK_LINK = new BlockPos(3, 2, 1);
 
     private static final String FACTORY_ADDRESS = "factory";
+    private static final String HOME_ADDRESS = "home";
 
     /**
      * Runs a real RS autocrafting task for an external pattern (2 iron ingots -> 1 iron block). The ingredients must
@@ -124,6 +134,91 @@ public class LogisticsDispatcherTests {
                 .thenExecute(() -> assertCount(helper,
                         net.minecraft.world.item.Items.IRON_BLOCK.getDefaultInstance(), 1))
                 .thenSucceed();
+    }
+
+    /**
+     * The reverse direction: a Create logistics order for an item that the RS network can craft but doesn't have.
+     * The bridge must list the item as infinite, hold the order while RS crafts it (here through the dispatcher), and
+     * then package the crafted item to the order's address.
+     */
+    @GameTest(template = "empty_6x3x3", timeoutTicks = 600)
+    public static void createOrderTriggersRsAutocrafting(GameTestHelper helper) {
+        helper.setBlock(CONTROLLER, rsBlock("creative_controller"));
+        helper.setBlock(STORAGE, rsBlock("creative_storage_block"));
+        helper.setBlock(BRIDGE, ModBlocks.LOGISTICS_BRIDGE.get());
+        helper.setBlock(BRIDGE_PACKAGER,
+                AllBlocks.PACKAGER.getDefaultState().setValue(PackagerBlock.FACING, Direction.EAST));
+        helper.setBlock(STOCK_LINK, AllBlocks.STOCK_LINK.getDefaultState()
+                .setValue(BlockStateProperties.ATTACH_FACE, AttachFace.FLOOR));
+
+        helper.setBlock(AUTOCRAFTER, withDirection(rsBlock("autocrafter").defaultBlockState(), Direction.EAST));
+        helper.setBlock(DISPATCHER, ModBlocks.LOGISTICS_DISPATCHER.get());
+        helper.setBlock(DISPATCHER_PACKAGER,
+                AllBlocks.PACKAGER.getDefaultState().setValue(PackagerBlock.FACING, Direction.EAST));
+        helper.setBlock(SIGN, Blocks.OAK_SIGN);
+        SignBlockEntity sign = helper.getBlockEntity(SIGN);
+        sign.setText(new SignText().setMessage(0, Component.literal(FACTORY_ADDRESS)), true);
+
+        ItemResource ironIngot = ItemResource.ofItemStack(new ItemStack(net.minecraft.world.item.Items.IRON_INGOT));
+        ItemResource ironBlock = ItemResource.ofItemStack(new ItemStack(net.minecraft.world.item.Items.IRON_BLOCK));
+        ItemStack ironBlockStack = new ItemStack(net.minecraft.world.item.Items.IRON_BLOCK);
+
+        helper.startSequence()
+                .thenWaitUntil(() -> helper.assertBlockProperty(BRIDGE, LogisticsBridgeBlock.ACTIVE, true))
+                .thenExecute(() -> {
+                    patternContainer(helper).setItem(0, processingPattern(ironIngot, 2, ironBlock, 1));
+                    ItemStack remainder = bridgeHandler(helper).insertItem(0,
+                            new ItemStack(net.minecraft.world.item.Items.IRON_INGOT, 2), false);
+                    helper.assertTrue(remainder.isEmpty(), "Network rejected iron ingots: " + remainder);
+                })
+                .thenWaitUntil(() -> helper.assertTrue(
+                        LogisticsManager.getSummaryOfNetwork(freq(helper), true).getCountOf(ironBlockStack)
+                                >= BigItemStack.INF,
+                        "Logistics network does not list the craftable iron block as infinite"))
+                .thenExecute(() -> {
+                    // Restock gauges read the packager's own summary, which must keep real counts.
+                    int local = bridgePackager(helper).getAvailableItems().getCountOf(ironBlockStack);
+                    helper.assertTrue(local == 0, "Packager's own summary shows " + local + " iron blocks");
+
+                    boolean sent = LogisticsManager.broadcastPackageRequest(freq(helper), RequestType.PLAYER,
+                            PackageOrderWithCrafts.simple(List.of(new BigItemStack(ironBlockStack.copy(), 1))),
+                            null, HOME_ADDRESS);
+                    helper.assertTrue(sent, "Order was not accepted by the logistics network");
+                    helper.assertTrue(bridge(helper).getCrafting().getHeldOrderCount() == 1,
+                            "Bridge is not holding the order for autocrafting");
+                    helper.assertTrue(bridgePackager(helper).heldBox.isEmpty()
+                                    && bridgePackager(helper).queuedExitingPackages.isEmpty(),
+                            "Bridge packager sent a package before the item was crafted");
+                    helper.assertFalse(autocrafting(helper).getStatuses().isEmpty(), "No RS task was started");
+                })
+                .thenWaitUntil(() -> helper.assertFalse(dispatcherPackager(helper).heldBox.isEmpty(),
+                        "Dispatcher packager has not sent the ingredients"))
+                .thenExecute(() -> helper.assertTrue(bridgePackager(helper).unwrapBox(
+                                PackageItem.containing(List.of(ironBlockStack.copy())), false),
+                        "Result package was not unpacked"))
+                .thenWaitUntil(() -> helper.assertFalse(bridgePackager(helper).heldBox.isEmpty(),
+                        "Bridge packager has not sent the crafted item"))
+                .thenExecute(() -> {
+                    ItemStack box = bridgePackager(helper).heldBox;
+                    helper.assertTrue(HOME_ADDRESS.equals(PackageItem.getAddress(box)),
+                            "Order package addressed to '" + PackageItem.getAddress(box) + "'");
+                    ItemStack first = PackageItem.getContents(box).getStackInSlot(0);
+                    helper.assertTrue(first.is(net.minecraft.world.item.Items.IRON_BLOCK) && first.getCount() == 1,
+                            "Order package holds " + first + " instead of 1 iron block");
+                    helper.assertTrue(bridge(helper).getCrafting().getHeldOrderCount() == 0,
+                            "Bridge is still holding the order");
+                    assertCount(helper, ironBlockStack, 0);
+                })
+                .thenSucceed();
+    }
+
+    private static UUID freq(GameTestHelper helper) {
+        PackagerLinkBlockEntity link = helper.getBlockEntity(STOCK_LINK);
+        return link.behaviour.freqId;
+    }
+
+    private static LogisticsBridgeBlockEntity bridge(GameTestHelper helper) {
+        return helper.getBlockEntity(BRIDGE);
     }
 
     private static ItemStack processingPattern(ItemResource input, long inputAmount, ItemResource output,

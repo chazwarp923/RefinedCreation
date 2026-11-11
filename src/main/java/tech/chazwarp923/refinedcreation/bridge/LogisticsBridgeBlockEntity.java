@@ -23,6 +23,7 @@ public class LogisticsBridgeBlockEntity extends AbstractNetworkNodeContainerBloc
     private static final int ACTIVENESS_CHECK_INTERVAL = 20;
 
     private final NetworkItemHandler itemHandler;
+    private final BridgeCrafting crafting;
     private int ticks;
 
     public LogisticsBridgeBlockEntity(BlockPos pos, BlockState state) {
@@ -31,10 +32,20 @@ public class LogisticsBridgeBlockEntity extends AbstractNetworkNodeContainerBloc
                 this::getNetworkStorage,
                 () -> level == null ? 0L : level.getGameTime(),
                 new NetworkNodeActor(mainNetworkNode));
+        this.crafting = new BridgeCrafting(
+                this::getActiveNetwork,
+                () -> level == null ? 0L : level.getGameTime(),
+                new NetworkNodeActor(mainNetworkNode),
+                itemHandler);
+        itemHandler.setCrafting(crafting);
     }
 
     public NetworkItemHandler getItemHandler() {
         return itemHandler;
+    }
+
+    public BridgeCrafting getCrafting() {
+        return crafting;
     }
 
     /**
@@ -50,11 +61,20 @@ public class LogisticsBridgeBlockEntity extends AbstractNetworkNodeContainerBloc
      */
     @Nullable
     private StorageNetworkComponent getNetworkStorage() {
+        Network network = getActiveNetwork();
+        return network == null ? null : network.getComponent(StorageNetworkComponent.class);
+    }
+
+    /**
+     * @return the network, or {@code null} if the bridge is not connected or not powered
+     */
+    @Nullable
+    private Network getActiveNetwork() {
         Network network = mainNetworkNode.getNetwork();
         if (network == null || !mainNetworkNode.isActive()) {
             return null;
         }
-        return network.getComponent(StorageNetworkComponent.class);
+        return network;
     }
 
     void serverTick(BlockState state) {
@@ -63,6 +83,7 @@ public class LogisticsBridgeBlockEntity extends AbstractNetworkNodeContainerBloc
         }
         mainNetworkNode.doWork();
         itemHandler.syncNetwork();
+        crafting.tick();
     }
 
     private void updateActiveness(BlockState state) {
@@ -95,5 +116,6 @@ public class LogisticsBridgeBlockEntity extends AbstractNetworkNodeContainerBloc
     public void setRemoved() {
         super.setRemoved();
         itemHandler.detach();
+        crafting.clear();
     }
 }

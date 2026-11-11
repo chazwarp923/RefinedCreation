@@ -24,6 +24,28 @@ You get:
 The bridge also works as a plain inventory for funnels, chutes and hoppers: they can pull from and push into the
 network through it.
 
+## Ordering RS-craftable items from Create
+
+With a Stock Link on the bridge's Packager, every item the RS network has an autocrafting pattern for shows up in
+Stock Keepers as **∞**, even when none are stored. Ordering one (from a Stock Keeper, or a Factory Gauge requesting
+ingredients) works like this:
+
+- If RS has enough in storage, the order is packaged straight away, as usual.
+- Otherwise the bridge starts an RS autocrafting task for the shortfall and holds the order. Once every task has
+  finished or been cancelled, the order is packaged and sent with whatever is in storage at that point.
+- If RS can't craft the item (missing ingredients, say), no task is started and the order is packaged from stock
+  straight away, the same as for any inventory that runs short.
+
+Notes:
+
+- Items RS can craft show ∞ in place of their stored count, so you won't see the real stored amount in the Stock
+  Keeper. RS's own grid still shows it.
+- Factory Gauges on the bridge's Packager in restock mode still see real counts, so restocking RS keeps working.
+- Orders are held for at most `bridgeCraftingTimeoutTicks` (default 6000, five minutes). Set `bridgeAutocrafting =
+  false` to turn the whole feature off.
+- Held orders are kept in memory only. If the bridge's chunk unloads or the server stops while an order is held,
+  the order is dropped. The RS tasks keep running and their output stays in the network, so you just order again.
+
 ## Autocrafting with Create factories
 
 The **Logistics Dispatcher** lets Refined Storage autocrafting use a Create factory to process ingredients.
@@ -57,7 +79,7 @@ like any other external pattern output.
 
 ```
 ./gradlew build              # jar in build/libs
-./gradlew runGameTestServer  # runs the integration tests (bridge packager round trip; autocrafting via dispatcher)
+./gradlew runGameTestServer  # integration tests: bridge round trip, autocrafting via dispatcher, Create orders crafted by RS
 ```
 
 Dependencies: Create 6.0.10+, Refined Storage 2.0.9+.
