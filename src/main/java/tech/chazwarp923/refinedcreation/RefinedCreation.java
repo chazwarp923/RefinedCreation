@@ -21,6 +21,9 @@ import tech.chazwarp923.refinedcreation.bridge.NetworkUnpackingHandler;
 import tech.chazwarp923.refinedcreation.dispatcher.DispatcherSinkFactory;
 import tech.chazwarp923.refinedcreation.registry.ModBlockEntities;
 import tech.chazwarp923.refinedcreation.registry.ModBlocks;
+import tech.chazwarp923.refinedcreation.registry.ModMenus;
+import tech.chazwarp923.refinedcreation.workbench.WorkbenchPackets;
+import tech.chazwarp923.refinedcreation.workbench.WorkbenchUnpackingHandler;
 
 /**
  * Refined Creation bridges a Refined Storage 2 network into Create 6's logistics system.
@@ -34,6 +37,10 @@ import tech.chazwarp923.refinedcreation.registry.ModBlocks;
  * The {@link ModBlocks#LOGISTICS_DISPATCHER Logistics Dispatcher} goes the other way for autocrafting: an RS
  * Autocrafter facing it ships its external pattern's ingredients as a package to a Create factory, and the
  * factory's result package returns through a bridge to complete the RS task.
+ * <p>
+ * The {@link ModBlocks#LOGISTICS_WORKBENCH Logistics Workbench} is a crafting grid for a Create logistics network:
+ * it lists the network's stock, orders ingredients delivered by package into its buffer, refills its crafting
+ * grid from that buffer, and packages leftovers back out.
  */
 @Mod(RefinedCreation.MODID)
 public class RefinedCreation {
@@ -43,10 +50,12 @@ public class RefinedCreation {
     public RefinedCreation(IEventBus modEventBus, ModContainer modContainer) {
         ModBlocks.register(modEventBus);
         ModBlockEntities.register(modEventBus);
+        ModMenus.register(modEventBus);
 
         modEventBus.addListener(this::commonSetup);
         modEventBus.addListener(this::registerCapabilities);
         modEventBus.addListener(this::addCreative);
+        modEventBus.addListener(WorkbenchPackets::register);
 
         modContainer.registerConfig(ModConfig.Type.COMMON, Config.SPEC);
     }
@@ -55,6 +64,9 @@ public class RefinedCreation {
         // Create's default unpacker assumes a real slotted inventory; the bridge inserts into the network directly.
         event.enqueueWork(() -> {
             UnpackingHandler.REGISTRY.register(ModBlocks.LOGISTICS_BRIDGE.get(), NetworkUnpackingHandler.INSTANCE);
+            // Deliveries to a Logistics Workbench land in its buffer.
+            UnpackingHandler.REGISTRY.register(ModBlocks.LOGISTICS_WORKBENCH.get(),
+                    WorkbenchUnpackingHandler.INSTANCE);
             // Autocrafters facing a Logistics Dispatcher send their ingredients out as Create packages.
             RefinedStorageApi.INSTANCE.addPatternProviderExternalPatternSinkFactory(DispatcherSinkFactory.INSTANCE);
         });
@@ -80,6 +92,7 @@ public class RefinedCreation {
         if (event.getTabKey().equals(rsTab)) {
             event.accept(ModBlocks.LOGISTICS_BRIDGE_ITEM);
             event.accept(ModBlocks.LOGISTICS_DISPATCHER_ITEM);
+            event.accept(ModBlocks.LOGISTICS_WORKBENCH_ITEM);
         }
     }
 }

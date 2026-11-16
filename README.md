@@ -1,6 +1,7 @@
 # Refined Creation
 
 Connects a **Refined Storage 2** network to **Create 6**'s logistics system (NeoForge 1.21.1).
+It also adds a **Logistics Workbench**: a crafting grid fed by a Create logistics network.
 
 ## Disclaimer
 This was 100% vibe coded using claude code. I do know how to code and have written Minecraft mods in the past.
@@ -68,6 +69,37 @@ like any other external pattern output.
 - Don't point an Autocrafter at the Logistics Bridge itself. It would just push the ingredients back into the
   network.
 
+## Crafting from a Create network
+
+The **Logistics Workbench** is a crafting grid for a Create logistics network, styled after the Stock Keeper. It
+works with any Create logistics network, with or without a Logistics Bridge: whatever Stock Keepers on that
+network can see, the workbench can order.
+
+Recipe: a Stock Link on top, a Crafting Table in the middle, any wooden chest (`c:chests/wooden`) at the bottom
+centre, and Brass Ingots around them.
+
+Setup:
+
+1. Tune the workbench like any Stock Link block: right-click a Stock Link with it before placing it, or right-click
+   the placed workbench with a tuned Stock Link or Stock Ticker.
+2. Place a Create **Packager** against the workbench, facing *away* from it. Packages delivered to this Packager
+   are unpacked into the workbench, and returned items leave through it.
+3. Give that Packager a way to receive packages (a Frogport or Postbox), and type its address into the workbench's
+   **Deliver to** field.
+
+Using it:
+
+- **Network stock** fills the top of the screen. Click an item to order it to the delivery address: left-click for
+  one, right-click for half a stack, shift-click for a stack.
+- **Crafting grid:** deliveries land in the **buffer** (the panel on the left), then move into the grid to fill the
+  last recipe you crafted. Shift-click the result to craft as many as the buffer allows.
+- **Order** (+) orders whatever the buffer and grid are missing for one more craft of the current recipe. Shift
+  orders for 16 crafts, Ctrl for 64. **Clear** (trash) empties the grid into the buffer and forgets the recipe.
+- **Returns:** put items on the shelf at the bottom and press **Send** to package them back to the network. They go
+  to the **Return to** address, or to the address on the Packager's sign if that field is blank.
+- **JEI:** the "+" button on a crafting recipe lays it out in the grid. Ingredients come from the buffer, then your
+  inventory; anything only on the network is ordered. Slots that will be ordered are highlighted orange.
+
 ## Notes
 
 - Uses RS energy (`bridgeEnergyUsage` in `config/refinedcreation-common.toml`, default 8/tick).
@@ -79,10 +111,10 @@ like any other external pattern output.
 
 ```
 ./gradlew build              # jar in build/libs
-./gradlew runGameTestServer  # integration tests: bridge round trip, autocrafting via dispatcher, Create orders crafted by RS
+./gradlew runGameTestServer  # integration tests: bridge, dispatcher, Create orders crafted by RS, Logistics Workbench
 ```
 
-Dependencies: Create 6.0.10+, Refined Storage 2.0.9+.
+Dependencies: Create 6.0.10+, Refined Storage 2.0.9+. JEI is optional (recipe transfer into the Logistics Workbench).
 
 ## License
 

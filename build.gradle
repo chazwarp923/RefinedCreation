@@ -36,6 +36,14 @@ repositories {
         forRepository { maven { url = "https://api.modrinth.com/maven" } }
         filter { includeGroup "maven.modrinth" }
     }
+    // JEI
+    exclusiveContent {
+        forRepository { maven { url = "https://maven.blamejared.com" } }
+        filter {
+            includeGroup "mezz.jei"
+            includeGroup "net.mezzdev.config" // JEI's config library
+        }
+    }
 }
 
 base {
@@ -173,6 +181,12 @@ dependencies {
     implementation("maven.modrinth:refined-storage:${refinedstorage_version}")
     // RS2's API is annotated with @API; providing it silences "unknown enum constant" compiler warnings.
     compileOnly("org.apiguardian:apiguardian-api:1.1.2")
+
+    // JEI - optional integration. Compile against the API only; the full mod is present in dev runs but is
+    // not a dependency of the published jar.
+    compileOnly("mezz.jei:jei-${minecraft_version}-common-api:${jei_version}")
+    compileOnly("mezz.jei:jei-${minecraft_version}-neoforge-api:${jei_version}")
+    localRuntime("mezz.jei:jei-${minecraft_version}-neoforge:${jei_version}")
 }
 
 // This block of code expands all declared replace properties in the specified resource targets.

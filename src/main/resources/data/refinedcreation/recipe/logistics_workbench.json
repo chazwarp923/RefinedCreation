@@ -1,0 +1,16 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " L ",
+    "BCB",
+    "BHB"
+  ],
+  "key": {
+    "C": { "item": "minecraft:crafting_table" },
+    "B": { "item": "create:brass_ingot" },
+    "L": { "item": "create:stock_link" },
+    "H": { "tag": "c:chests/wooden" }
+  },
+  "result": { "id": "refinedcreation:logistics_workbench", "count": 1 }
+}

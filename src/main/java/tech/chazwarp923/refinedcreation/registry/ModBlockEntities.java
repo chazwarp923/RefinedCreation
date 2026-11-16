@@ -8,6 +8,7 @@ import net.neoforged.bus.api.IEventBus;
 import net.neoforged.neoforge.registries.DeferredRegister;
 import tech.chazwarp923.refinedcreation.RefinedCreation;
 import tech.chazwarp923.refinedcreation.bridge.LogisticsBridgeBlockEntity;
+import tech.chazwarp923.refinedcreation.workbench.LogisticsWorkbenchBlockEntity;
 
 public final class ModBlockEntities {
     private static final DeferredRegister<BlockEntityType<?>> BLOCK_ENTITIES =
@@ -17,6 +18,12 @@ public final class ModBlockEntities {
     public static final Supplier<BlockEntityType<LogisticsBridgeBlockEntity>> LOGISTICS_BRIDGE =
             BLOCK_ENTITIES.register("logistics_bridge", () -> BlockEntityType.Builder
                     .of(LogisticsBridgeBlockEntity::new, ModBlocks.LOGISTICS_BRIDGE.get())
+                    .build(null));
+
+    @SuppressWarnings("DataFlowIssue") // the data fixer type may be null
+    public static final Supplier<BlockEntityType<LogisticsWorkbenchBlockEntity>> LOGISTICS_WORKBENCH =
+            BLOCK_ENTITIES.register("logistics_workbench", () -> BlockEntityType.Builder
+                    .of(LogisticsWorkbenchBlockEntity::new, ModBlocks.LOGISTICS_WORKBENCH.get())
                     .build(null));
 
     private ModBlockEntities() {
