@@ -1,6 +1,7 @@
 package tech.chazwarp923.refinedcreation.workbench.client;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 
@@ -18,15 +19,19 @@ import com.simibubi.create.foundation.gui.AllIcons;
 import com.simibubi.create.foundation.gui.widget.IconButton;
 
 import net.minecraft.ChatFormatting;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.renderer.Rect2i;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.world.entity.player.Inventory;
 import net.neoforged.neoforge.network.PacketDistributor;
+import tech.chazwarp923.refinedcreation.ClientConfig;
 import tech.chazwarp923.refinedcreation.workbench.LogisticsWorkbenchBlockEntity;
 import tech.chazwarp923.refinedcreation.workbench.LogisticsWorkbenchMenu;
 import tech.chazwarp923.refinedcreation.workbench.WorkbenchPackets;
@@ -38,7 +43,8 @@ import tech.chazwarp923.refinedcreation.workbench.WorkbenchPackets.RequestPayloa
  * The Logistics Workbench GUI, styled after Create's Stock Keeper. It draws Create's own textures, which are
  * always present because Create is a required dependency. From top to bottom:
  * <ol>
- * <li>Create's banner header with the title and search bar;</li>
+ * <li>Create's banner header with the title and search bar, flanked by the sort mode and direction
+ * buttons;</li>
  * <li>the network's stock on wooden rows, as many as the screen has room for (click to order);</li>
  * <li>the crafting section: the 3x3 grid and result, the delivery and return addresses, and the Order, Clear
  * and Send buttons;</li>
@@ -132,6 +138,11 @@ public class LogisticsWorkbenchScreen extends AbstractContainerScreen<LogisticsW
 
     private static final long STATUS_MILLIS = 6000;
 
+    // Sort buttons, on the wood either side of the header's search bar (relative to the header's top).
+    private static final int SORT_BUTTON_X = 22;
+    private static final int DIRECTION_BUTTON_X = 186;
+    private static final int SORT_BUTTONS_Y = 17;
+
     // Create's palette.
     private static final int COLOR_TITLE = 0x714A40;
     private static final int COLOR_SEARCH = 0x4A2D31;
@@ -155,6 +166,8 @@ public class LogisticsWorkbenchScreen extends AbstractContainerScreen<LogisticsW
     private IconButton orderButton;
     private IconButton clearButton;
     private IconButton sendButton;
+    private IconButton sortButton;
+    private IconButton directionButton;
 
     private List<BigItemStack> filtered = List.of();
     private int seenStockVersion = -1;
@@ -174,6 +187,10 @@ public class LogisticsWorkbenchScreen extends AbstractContainerScreen<LogisticsW
 
     @Override
     protected void init() {
+        // Only on first opening: init runs again whenever the window is resized.
+        if (search == null) {
+            WorkbenchClientPackets.onScreenOpened(menu);
+        }
         // As many stock rows as fit, like the Stock Keeper's own window.
         int fixed = AllGuiTextures.STOCK_KEEPER_REQUEST_HEADER.getHeight() + BELOW_ORIGIN;
         stockRows = Math.max(MIN_STOCK_ROWS, Math.min(MAX_STOCK_ROWS, (height - 10 - fixed) / ROW_HEIGHT));
@@ -197,6 +214,25 @@ public class LogisticsWorkbenchScreen extends AbstractContainerScreen<LogisticsW
                 menu.getDeliveryAddress(), false);
         returnAddress = addressBox(leftPos + TAG_X + 3, topPos + RETURN_Y + 3, TAG_WIDTH - 6,
                 menu.getReturnAddress(), true);
+
+        sortButton = new IconButton(leftPos + SORT_BUTTON_X, headerY + SORT_BUTTONS_Y, LogisticsWorkbenchScreen::renderSortIcon);
+        sortButton.withCallback(() -> {
+            ClientConfig.WorkbenchSort[] modes = ClientConfig.WorkbenchSort.values();
+            ClientConfig.WORKBENCH_SORT.set(modes[(sortMode().ordinal() + 1) % modes.length]);
+            ClientConfig.WORKBENCH_SORT.save();
+            updateSortButtons();
+            refilter();
+        });
+        addRenderableWidget(sortButton);
+        directionButton = new IconButton(leftPos + DIRECTION_BUTTON_X, headerY + SORT_BUTTONS_Y, AllIcons.I_PRIORITY_LOW);
+        directionButton.withCallback(() -> {
+            ClientConfig.WORKBENCH_SORT_DESCENDING.set(!sortDescending());
+            ClientConfig.WORKBENCH_SORT_DESCENDING.save();
+            updateSortButtons();
+            refilter();
+        });
+        addRenderableWidget(directionButton);
+        updateSortButtons();
 
         orderButton = new IconButton(leftPos + BUTTONS_X, topPos + ORDER_Y, AllIcons.I_ADD);
         orderButton.withCallback(() -> sendAction(WorkbenchPackets.Action.ORDER_PATTERN, orderAmount()));
@@ -269,9 +305,67 @@ public class LogisticsWorkbenchScreen extends AbstractContainerScreen<LogisticsW
                 result.add(entry);
             }
         }
-        result.sort((a, b) -> Integer.compare(b.count, a.count));
+        result.sort(sortComparator());
         filtered = result;
         scrollRow = Math.min(scrollRow, maxScroll());
+    }
+
+    // --- Sorting ----------------------------------------------------------------------------------------------
+
+    private static ClientConfig.WorkbenchSort sortMode() {
+        return ClientConfig.WORKBENCH_SORT.get();
+    }
+
+    private static boolean sortDescending() {
+        return ClientConfig.WORKBENCH_SORT_DESCENDING.get();
+    }
+
+    /**
+     * The order for the stock list, as in a Refined Storage grid. Ties fall back to the name and then the item
+     * ID, so the order is stable from one sync to the next.
+     */
+    private static Comparator<BigItemStack> sortComparator() {
+        Comparator<BigItemStack> byName = Comparator.comparing(
+                (BigItemStack entry) -> entry.stack.getHoverName().getString(), String.CASE_INSENSITIVE_ORDER);
+        Comparator<BigItemStack> byId = Comparator.comparing(
+                (BigItemStack entry) -> BuiltInRegistries.ITEM.getKey(entry.stack.getItem()).toString());
+        Comparator<BigItemStack> primary = switch (sortMode()) {
+            case QUANTITY -> Comparator.comparingInt((BigItemStack entry) -> entry.count);
+            case NAME -> byName;
+            case ID -> byId;
+        };
+        if (sortDescending()) {
+            primary = primary.reversed();
+        }
+        return primary.thenComparing(byName).thenComparing(byId);
+    }
+
+    private void updateSortButtons() {
+        String mode = sortMode().name().toLowerCase(Locale.ROOT);
+        sortButton.setToolTip(Component.translatable("refinedcreation.workbench.sort",
+                Component.translatable("refinedcreation.workbench.sort." + mode)));
+        sortButton.getToolTip().add(Component.translatable("refinedcreation.workbench.sort.tooltip")
+                .withStyle(ChatFormatting.GRAY));
+
+        boolean descending = sortDescending();
+        directionButton.setIcon(descending ? AllIcons.I_PRIORITY_LOW : AllIcons.I_PRIORITY_HIGH);
+        directionButton.setToolTip(Component.translatable(descending
+                ? "refinedcreation.workbench.sort.descending" : "refinedcreation.workbench.sort.ascending"));
+        directionButton.getToolTip().add(Component.translatable("refinedcreation.workbench.sort.direction.tooltip")
+                .withStyle(ChatFormatting.GRAY));
+    }
+
+    /**
+     * The sort button's icon: a short label for the current mode, drawn in the 16px icon area.
+     */
+    private static void renderSortIcon(GuiGraphics graphics, int x, int y) {
+        String label = switch (sortMode()) {
+            case QUANTITY -> "64";
+            case NAME -> "Az";
+            case ID -> "ID";
+        };
+        Font font = Minecraft.getInstance().font;
+        graphics.drawString(font, label, x + 8 - font.width(label) / 2 + 1, y + 4, 0xFFFFFF, true);
     }
 
     private int maxScroll() {
@@ -668,7 +762,8 @@ public class LogisticsWorkbenchScreen extends AbstractContainerScreen<LogisticsW
      * Create's icon buttons keep their own tooltips, which only Create's screen base class draws.
      */
     private void renderWidgetTooltips(GuiGraphics graphics, int mouseX, int mouseY) {
-        for (IconButton button : new IconButton[] {orderButton, clearButton, sendButton}) {
+        for (IconButton button : new IconButton[] {orderButton, clearButton, sendButton, sortButton,
+                directionButton}) {
             if (button.isHovered() && !button.getToolTip().isEmpty()) {
                 graphics.renderComponentTooltip(font, button.getToolTip(), mouseX, mouseY);
             }
@@ -697,7 +792,7 @@ public class LogisticsWorkbenchScreen extends AbstractContainerScreen<LogisticsW
     }
 
     /**
-     * Shows the latest status on a Stock Keeper banner over the bottom of the stock list.
+     * Shows the latest status on a Stock Keeper banner below the return shelf.
      */
     private void renderStatus(GuiGraphics graphics) {
         Component status = menu.getStatus(STATUS_MILLIS);
@@ -706,7 +801,9 @@ public class LogisticsWorkbenchScreen extends AbstractContainerScreen<LogisticsW
         }
         int textWidth = font.width(status);
         int msgX = leftPos + WINDOW_WIDTH / 2 - (textWidth + 10) / 2;
-        int msgY = topPos - 16;
+        // Across the window's bottom edge, under the return shelf, so it never hides the stock list. The
+        // 16px banner straddles the gap between the window and the inventory frame.
+        int msgY = topPos + FOOTER_Y + FOOTER_HEIGHT - 5;
         PoseStack pose = graphics.pose();
         pose.pushPose();
         pose.translate(0, 0, 300);

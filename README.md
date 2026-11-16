@@ -91,6 +91,9 @@ Using it:
 
 - **Network stock** fills the top of the screen. Click an item to order it to the delivery address: left-click for
   one, right-click for half a stack, shift-click for a stack.
+- **Sorting:** the buttons either side of the search bar pick the sort order, like a Refined Storage grid. The left
+  one cycles between quantity, name and item ID; the right one switches between descending and ascending. The
+  choice is saved in `config/refinedcreation-client.toml`.
 - **Crafting grid:** deliveries land in the **buffer** (the panel on the left), then move into the grid to fill the
   last recipe you crafted. Shift-click the result to craft as many as the buffer allows.
 - **Order** (+) orders whatever the buffer and grid are missing for one more craft of the current recipe. Shift

@@ -37,8 +37,8 @@ import tech.chazwarp923.refinedcreation.workbench.WorkbenchPackets.StockPayload;
  * The Logistics Workbench's container. On the server its slots are backed by the block entity. On the client
  * they're backed by throwaway containers that vanilla's slot sync fills.
  * <p>
- * The network stock list isn't made of slots. The server sends it to the client every
- * {@link #STOCK_SYNC_INTERVAL} ticks as a {@link StockPayload}.
+ * The network stock list isn't made of slots. The server sends it to the client as a {@link StockPayload} when
+ * the screen asks for it on opening, then every {@link #STOCK_SYNC_INTERVAL} ticks.
  */
 public class LogisticsWorkbenchMenu extends AbstractContainerMenu {
     public static final int STOCK_SYNC_INTERVAL = 20;
@@ -275,18 +275,30 @@ public class LogisticsWorkbenchMenu extends AbstractContainerMenu {
     public void broadcastChanges() {
         super.broadcastChanges();
         // Counted in game time: broadcastChanges also runs on every slot change, not just once per tick.
-        long now = player.level().getGameTime();
-        if (workbench != null && player instanceof ServerPlayer serverPlayer
-                && serverPlayer.connection.hasChannel(StockPayload.TYPE)
-                && now - lastStockSync >= STOCK_SYNC_INTERVAL) {
-            lastStockSync = now;
-            List<BigItemStack> stacks = new ArrayList<>();
-            for (BigItemStack entry : workbench.getNetworkStock(false).getStacks()) {
-                stacks.add(new BigItemStack(entry.stack.copyWithCount(1), entry.count));
-            }
-            PacketDistributor.sendToPlayer(serverPlayer,
-                    new StockPayload(containerId, workbench.getFrequency() != null, stacks));
+        if (player.level().getGameTime() - lastStockSync >= STOCK_SYNC_INTERVAL) {
+            sendStockNow();
         }
+    }
+
+    /**
+     * Sends the network stock to the client and restarts the periodic sync from now.
+     */
+    void sendStockNow() {
+        if (workbench == null || !(player instanceof ServerPlayer serverPlayer)
+                || !serverPlayer.connection.hasChannel(StockPayload.TYPE)) {
+            return;
+        }
+        lastStockSync = player.level().getGameTime();
+        List<BigItemStack> stacks = new ArrayList<>();
+        for (BigItemStack entry : workbench.getNetworkStock(false).getStacks()) {
+            stacks.add(new BigItemStack(entry.stack.copyWithCount(1), entry.count));
+        }
+        PacketDistributor.sendToPlayer(serverPlayer,
+                new StockPayload(containerId, workbench.getFrequency() != null, stacks));
+    }
+
+    public BlockPos getPos() {
+        return pos;
     }
 
     void handleRequest(ItemStack item, int count) {

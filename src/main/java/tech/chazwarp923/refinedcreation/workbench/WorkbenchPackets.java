@@ -90,6 +90,22 @@ public final class WorkbenchPackets {
     }
 
     /**
+     * Client → server: send the network stock now. The screen sends this as soon as it opens, so the list
+     * appears at once instead of at the next periodic sync.
+     */
+    public record StockRequestPayload(int containerId) implements CustomPacketPayload {
+        public static final Type<StockRequestPayload> TYPE = new Type<>(id("workbench_stock_request"));
+        public static final StreamCodec<RegistryFriendlyByteBuf, StockRequestPayload> STREAM_CODEC =
+                ByteBufCodecs.VAR_INT.<RegistryFriendlyByteBuf>cast()
+                        .map(StockRequestPayload::new, StockRequestPayload::containerId);
+
+        @Override
+        public Type<StockRequestPayload> type() {
+            return TYPE;
+        }
+    }
+
+    /**
      * Client → server: press one of the GUI's buttons.
      */
     public record ActionPayload(int containerId, Action action, int amount) implements CustomPacketPayload {
@@ -156,6 +172,8 @@ public final class WorkbenchPackets {
                 (payload, context) -> WorkbenchClientPackets.handleStock(payload));
         registrar.playToClient(StatusPayload.TYPE, StatusPayload.STREAM_CODEC,
                 (payload, context) -> WorkbenchClientPackets.handleStatus(payload));
+        registrar.playToServer(StockRequestPayload.TYPE, StockRequestPayload.STREAM_CODEC, (payload, context) ->
+                withMenu(context, payload.containerId(), LogisticsWorkbenchMenu::sendStockNow));
         registrar.playToServer(RequestPayload.TYPE, RequestPayload.STREAM_CODEC, (payload, context) ->
                 withMenu(context, payload.containerId(), menu -> menu.handleRequest(payload.item(), payload.count())));
         registrar.playToServer(ActionPayload.TYPE, ActionPayload.STREAM_CODEC, (payload, context) ->
