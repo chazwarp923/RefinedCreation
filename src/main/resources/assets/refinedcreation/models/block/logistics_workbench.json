@@ -1,9 +1,9 @@
 {
   "parent": "minecraft:block/cube_bottom_top",
   "textures": {
-    "side": "create:block/brass_casing",
-    "top": "minecraft:block/crafting_table_top",
-    "bottom": "create:block/brass_casing",
-    "particle": "create:block/brass_casing"
+    "side": "refinedcreation:block/logistics_workbench/side",
+    "top": "refinedcreation:block/logistics_workbench/top",
+    "bottom": "refinedcreation:block/logistics_workbench/bottom",
+    "particle": "refinedcreation:block/logistics_workbench/side"
   }
 }

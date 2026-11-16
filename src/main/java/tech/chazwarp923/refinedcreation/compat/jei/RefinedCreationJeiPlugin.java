@@ -9,6 +9,7 @@ import mezz.jei.api.gui.handlers.IGuiContainerHandler;
 import mezz.jei.api.registration.IGuiHandlerRegistration;
 import mezz.jei.api.registration.IRecipeCatalystRegistration;
 import mezz.jei.api.registration.IRecipeTransferRegistration;
+import mezz.jei.api.runtime.IJeiRuntime;
 import net.minecraft.client.renderer.Rect2i;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
@@ -27,6 +28,7 @@ import tech.chazwarp923.refinedcreation.workbench.client.LogisticsWorkbenchScree
  * <li>the parts of the GUI outside the screen's normal bounds (the header, the stock list and the buffer
  * panel) as extra areas, so JEI's overlays don't draw over them.</li>
  * </ul>
+ * It also hands JEI's runtime to {@link JeiSearchSync}, for syncing the workbench's search with JEI's.
  */
 @JeiPlugin
 public class RefinedCreationJeiPlugin implements IModPlugin {
@@ -35,6 +37,16 @@ public class RefinedCreationJeiPlugin implements IModPlugin {
     @Override
     public ResourceLocation getPluginUid() {
         return ID;
+    }
+
+    @Override
+    public void onRuntimeAvailable(IJeiRuntime runtime) {
+        JeiSearchSync.setRuntime(runtime);
+    }
+
+    @Override
+    public void onRuntimeUnavailable() {
+        JeiSearchSync.setRuntime(null);
     }
 
     @Override

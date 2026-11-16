@@ -16,13 +16,13 @@ public class ClientConfig {
     private static final ModConfigSpec.Builder BUILDER = new ModConfigSpec.Builder();
 
     public static final ModConfigSpec.EnumValue<WorkbenchSort> WORKBENCH_SORT = BUILDER
-            .comment("How the Logistics Workbench sorts the network's stock. Changed with the button left of its",
-                    "search bar.")
+            .comment("How the Logistics Workbench sorts the network's stock. Left-click the sort button right of",
+                    "its search bar to change it.")
             .defineEnum("workbenchSort", WorkbenchSort.QUANTITY);
 
     public static final ModConfigSpec.BooleanValue WORKBENCH_SORT_DESCENDING = BUILDER
-            .comment("Whether the Logistics Workbench sorts its stock in descending order. Changed with the button",
-                    "right of its search bar.")
+            .comment("Whether the Logistics Workbench sorts its stock in descending order. Right-click the sort",
+                    "button right of its search bar to change it.")
             .define("workbenchSortDescending", true);
 
     public static final ModConfigSpec SPEC = BUILDER.build();

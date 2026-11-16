@@ -13,10 +13,11 @@ import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.simibubi.create.content.logistics.AddressEditBox;
 import com.simibubi.create.content.logistics.BigItemStack;
+import com.simibubi.create.content.logistics.stockTicker.StockKeeperRequestScreen.SearchSyncMode;
 import com.simibubi.create.content.trains.station.NoShadowFontWrapper;
 import com.simibubi.create.foundation.gui.AllGuiTextures;
-import com.simibubi.create.foundation.gui.AllIcons;
 import com.simibubi.create.foundation.gui.widget.IconButton;
+import com.simibubi.create.infrastructure.config.AllConfigs;
 
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
@@ -25,13 +26,17 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.renderer.Rect2i;
+import net.minecraft.client.resources.sounds.SimpleSoundInstance;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.sounds.SoundEvents;
 import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.world.entity.player.Inventory;
+import net.neoforged.fml.ModList;
 import net.neoforged.neoforge.network.PacketDistributor;
 import tech.chazwarp923.refinedcreation.ClientConfig;
+import tech.chazwarp923.refinedcreation.compat.jei.JeiSearchSync;
 import tech.chazwarp923.refinedcreation.workbench.LogisticsWorkbenchBlockEntity;
 import tech.chazwarp923.refinedcreation.workbench.LogisticsWorkbenchMenu;
 import tech.chazwarp923.refinedcreation.workbench.WorkbenchPackets;
@@ -43,8 +48,8 @@ import tech.chazwarp923.refinedcreation.workbench.WorkbenchPackets.RequestPayloa
  * The Logistics Workbench GUI, styled after Create's Stock Keeper. It draws Create's own textures, which are
  * always present because Create is a required dependency. From top to bottom:
  * <ol>
- * <li>Create's banner header with the title and search bar, flanked by the sort mode and direction
- * buttons;</li>
+ * <li>Create's banner header with the title and search bar, flanked by the JEI search sync button (when JEI
+ * is installed) and the sort button;</li>
  * <li>the network's stock on wooden rows, as many as the screen has room for (click to order);</li>
  * <li>the crafting section: the 3x3 grid and result, the delivery and return addresses, and the Order, Clear
  * and Send buttons;</li>
@@ -131,17 +136,23 @@ public class LogisticsWorkbenchScreen extends AbstractContainerScreen<LogisticsW
     private static final int TAG_HEIGHT = 15;
     private static final int DELIVERY_Y = 3;
     private static final int RETURN_Y = 42;
-    private static final int BUTTONS_X = 178;
-    private static final int ORDER_Y = 2;
-    private static final int CLEAR_Y = 21;
-    private static final int SEND_Y = 40;
+    // In line with the address tags: order beside the delivery tag, send beside the return tag.
+    private static final int BUTTONS_X = 179;
+    private static final int ORDER_Y = DELIVERY_Y;
+    private static final int CLEAR_Y = 22;
+    private static final int SEND_Y = RETURN_Y;
 
     private static final long STATUS_MILLIS = 6000;
 
-    // Sort buttons, on the wood either side of the header's search bar (relative to the header's top).
-    private static final int SORT_BUTTON_X = 22;
-    private static final int DIRECTION_BUTTON_X = 186;
-    private static final int SORT_BUTTONS_Y = 17;
+    // Beside the header's search bar (relative to the header's top): the JEI sync mode on the left, where the
+    // Stock Keeper has it, and the sort button on the right.
+    private static final int SYNC_BUTTON_X = 25;
+    private static final int SYNC_BUTTON_Y = 18;
+    private static final int SYNC_BUTTON_SIZE = 15;
+    private static final int SORT_BUTTON_X = 186;
+    private static final int SORT_BUTTON_Y = 18;
+
+    private static final boolean JEI_LOADED = ModList.get().isLoaded("jei");
 
     // Create's palette.
     private static final int COLOR_TITLE = 0x714A40;
@@ -167,11 +178,12 @@ public class LogisticsWorkbenchScreen extends AbstractContainerScreen<LogisticsW
     private IconButton clearButton;
     private IconButton sendButton;
     private IconButton sortButton;
-    private IconButton directionButton;
 
     private List<BigItemStack> filtered = List.of();
     private int seenStockVersion = -1;
     private String seenSearch = "";
+    /** JEI's search text when it was last copied into ours. */
+    private String seenJeiSearch = "";
     private int scrollRow;
 
     public LogisticsWorkbenchScreen(LogisticsWorkbenchMenu menu, Inventory inventory, Component title) {
@@ -188,7 +200,8 @@ public class LogisticsWorkbenchScreen extends AbstractContainerScreen<LogisticsW
     @Override
     protected void init() {
         // Only on first opening: init runs again whenever the window is resized.
-        if (search == null) {
+        boolean opening = search == null;
+        if (opening) {
             WorkbenchClientPackets.onScreenOpened(menu);
         }
         // As many stock rows as fit, like the Stock Keeper's own window.
@@ -209,46 +222,45 @@ public class LogisticsWorkbenchScreen extends AbstractContainerScreen<LogisticsW
         search.setTextColor(COLOR_SEARCH);
         search.setValue(seenSearch);
         addRenderableWidget(search);
+        // As the Stock Keeper does: take JEI's search, and on opening, give JEI ours.
+        pullSearchFromJei();
+        if (opening) {
+            pushSearchToJei();
+        }
 
         deliveryAddress = addressBox(leftPos + TAG_X + 3, topPos + DELIVERY_Y + 3, TAG_WIDTH - 6,
                 menu.getDeliveryAddress(), false);
         returnAddress = addressBox(leftPos + TAG_X + 3, topPos + RETURN_Y + 3, TAG_WIDTH - 6,
                 menu.getReturnAddress(), true);
 
-        sortButton = new IconButton(leftPos + SORT_BUTTON_X, headerY + SORT_BUTTONS_Y, LogisticsWorkbenchScreen::renderSortIcon);
+        // Left-click cycles the sort mode; right-click (in mouseClicked) reverses the order.
+        sortButton = new WoodButton(leftPos + SORT_BUTTON_X, headerY + SORT_BUTTON_Y,
+                LogisticsWorkbenchScreen::renderSortIcon);
         sortButton.withCallback(() -> {
             ClientConfig.WorkbenchSort[] modes = ClientConfig.WorkbenchSort.values();
             ClientConfig.WORKBENCH_SORT.set(modes[(sortMode().ordinal() + 1) % modes.length]);
             ClientConfig.WORKBENCH_SORT.save();
-            updateSortButtons();
+            updateSortButton();
             refilter();
         });
         addRenderableWidget(sortButton);
-        directionButton = new IconButton(leftPos + DIRECTION_BUTTON_X, headerY + SORT_BUTTONS_Y, AllIcons.I_PRIORITY_LOW);
-        directionButton.withCallback(() -> {
-            ClientConfig.WORKBENCH_SORT_DESCENDING.set(!sortDescending());
-            ClientConfig.WORKBENCH_SORT_DESCENDING.save();
-            updateSortButtons();
-            refilter();
-        });
-        addRenderableWidget(directionButton);
-        updateSortButtons();
+        updateSortButton();
 
-        orderButton = new IconButton(leftPos + BUTTONS_X, topPos + ORDER_Y, AllIcons.I_ADD);
+        orderButton = new WoodButton(leftPos + BUTTONS_X, topPos + ORDER_Y, WoodButton.PLUS);
         orderButton.withCallback(() -> sendAction(WorkbenchPackets.Action.ORDER_PATTERN, orderAmount()));
         orderButton.setToolTip(Component.translatable("refinedcreation.workbench.order"));
         orderButton.getToolTip().add(Component.translatable("refinedcreation.workbench.order.tooltip")
                 .withStyle(ChatFormatting.GRAY));
         addRenderableWidget(orderButton);
 
-        clearButton = new IconButton(leftPos + BUTTONS_X, topPos + CLEAR_Y, AllIcons.I_TRASH);
+        clearButton = new WoodButton(leftPos + BUTTONS_X, topPos + CLEAR_Y, WoodButton.BIN);
         clearButton.withCallback(() -> sendAction(WorkbenchPackets.Action.CLEAR_GRID, 0));
         clearButton.setToolTip(Component.translatable("refinedcreation.workbench.clear"));
         clearButton.getToolTip().add(Component.translatable("refinedcreation.workbench.clear.tooltip")
                 .withStyle(ChatFormatting.GRAY));
         addRenderableWidget(clearButton);
 
-        sendButton = new IconButton(leftPos + BUTTONS_X, topPos + SEND_Y, AllIcons.I_SEND_ONLY);
+        sendButton = new WoodButton(leftPos + BUTTONS_X, topPos + SEND_Y, WoodButton.SEND);
         sendButton.withCallback(() -> sendAction(WorkbenchPackets.Action.SEND_RETURNS, 0));
         sendButton.setToolTip(Component.translatable("refinedcreation.workbench.send"));
         sendButton.getToolTip().add(Component.translatable("refinedcreation.workbench.send.tooltip")
@@ -286,10 +298,14 @@ public class LogisticsWorkbenchScreen extends AbstractContainerScreen<LogisticsW
         super.containerTick();
         deliveryAddress.tick();
         returnAddress.tick();
+        if (JEI_LOADED && JeiSearchSync.isTyping() && !seenJeiSearch.equals(JeiSearchSync.getFilterText())) {
+            pullSearchFromJei();
+        }
         String query = search.getValue();
         if (menu.getStockVersion() != seenStockVersion || !query.equals(seenSearch)) {
             if (!query.equals(seenSearch)) {
                 scrollRow = 0;
+                pushSearchToJei();
             }
             seenStockVersion = menu.getStockVersion();
             seenSearch = query;
@@ -308,6 +324,49 @@ public class LogisticsWorkbenchScreen extends AbstractContainerScreen<LogisticsW
         result.sort(sortComparator());
         filtered = result;
         scrollRow = Math.min(scrollRow, maxScroll());
+    }
+
+    // --- JEI search sync -------------------------------------------------------------------------------------
+
+    /**
+     * Copies JEI's search into ours, if Create's search sync setting allows it.
+     */
+    private void pullSearchFromJei() {
+        if (!JEI_LOADED || !syncMode().isBothOr(SearchSyncMode.SYNC_FROM_JEI)) {
+            return;
+        }
+        String text = JeiSearchSync.getFilterText();
+        if (text != null) {
+            seenJeiSearch = text;
+            search.setValue(text);
+        }
+    }
+
+    /**
+     * Copies our search into JEI's, if Create's search sync setting allows it.
+     */
+    private void pushSearchToJei() {
+        if (JEI_LOADED && syncMode().isBothOr(SearchSyncMode.SYNC_FROM_STOCK_KEEPER)) {
+            JeiSearchSync.setFilterText(search.getValue());
+        }
+    }
+
+    /**
+     * The workbench shares the Stock Keeper's search sync setting, so one button sets both.
+     */
+    private static SearchSyncMode syncMode() {
+        return AllConfigs.client().syncRecipeViewerSearch.get();
+    }
+
+    private boolean isOverSyncButton(double mouseX, double mouseY) {
+        int x = leftPos + SYNC_BUTTON_X;
+        int y = topPos - aboveOrigin() + SYNC_BUTTON_Y;
+        return JEI_LOADED && mouseX >= x && mouseX < x + SYNC_BUTTON_SIZE && mouseY >= y
+                && mouseY < y + SYNC_BUTTON_SIZE + 1;
+    }
+
+    private static void playClick() {
+        Minecraft.getInstance().getSoundManager().play(SimpleSoundInstance.forUI(SoundEvents.UI_BUTTON_CLICK, 1));
     }
 
     // --- Sorting ----------------------------------------------------------------------------------------------
@@ -340,23 +399,20 @@ public class LogisticsWorkbenchScreen extends AbstractContainerScreen<LogisticsW
         return primary.thenComparing(byName).thenComparing(byId);
     }
 
-    private void updateSortButtons() {
+    private void updateSortButton() {
         String mode = sortMode().name().toLowerCase(Locale.ROOT);
         sortButton.setToolTip(Component.translatable("refinedcreation.workbench.sort",
-                Component.translatable("refinedcreation.workbench.sort." + mode)));
+                Component.translatable("refinedcreation.workbench.sort." + mode),
+                Component.translatable(sortDescending()
+                        ? "refinedcreation.workbench.sort.descending" : "refinedcreation.workbench.sort.ascending")));
         sortButton.getToolTip().add(Component.translatable("refinedcreation.workbench.sort.tooltip")
                 .withStyle(ChatFormatting.GRAY));
-
-        boolean descending = sortDescending();
-        directionButton.setIcon(descending ? AllIcons.I_PRIORITY_LOW : AllIcons.I_PRIORITY_HIGH);
-        directionButton.setToolTip(Component.translatable(descending
-                ? "refinedcreation.workbench.sort.descending" : "refinedcreation.workbench.sort.ascending"));
-        directionButton.getToolTip().add(Component.translatable("refinedcreation.workbench.sort.direction.tooltip")
+        sortButton.getToolTip().add(Component.translatable("refinedcreation.workbench.sort.direction.tooltip")
                 .withStyle(ChatFormatting.GRAY));
     }
 
     /**
-     * The sort button's icon: a short label for the current mode, drawn in the 16px icon area.
+     * The sort button's glyph: a short label for the mode, and a small arrow under it for the direction.
      */
     private static void renderSortIcon(GuiGraphics graphics, int x, int y) {
         String label = switch (sortMode()) {
@@ -365,7 +421,15 @@ public class LogisticsWorkbenchScreen extends AbstractContainerScreen<LogisticsW
             case ID -> "ID";
         };
         Font font = Minecraft.getInstance().font;
-        graphics.drawString(font, label, x + 8 - font.width(label) / 2 + 1, y + 4, 0xFFFFFF, true);
+        // Text widths include a trailing pixel of spacing.
+        graphics.drawString(font, label, x + (WoodButton.SIZE - font.width(label) + 1) / 2, y + 2,
+                WoodButton.ARGB_INK, false);
+        // A 5px triangle: pointing down for descending, up for ascending.
+        boolean descending = sortDescending();
+        for (int row = 0; row < 3; row++) {
+            int half = descending ? 2 - row : row;
+            graphics.fill(x + 7 - half, y + 10 + row, x + 8 + half, y + 11 + row, WoodButton.ARGB_INK);
+        }
     }
 
     private int maxScroll() {
@@ -403,6 +467,27 @@ public class LogisticsWorkbenchScreen extends AbstractContainerScreen<LogisticsW
                     setFocused(null);
                 }
             }
+        }
+        // Right-clicking the search bar clears and selects it, as in the Stock Keeper.
+        if (button == GLFW.GLFW_MOUSE_BUTTON_RIGHT && search.isMouseOver(mouseX, mouseY)) {
+            search.setValue("");
+            setFocused(search);
+            search.setFocused(true);
+            return true;
+        }
+        if (button == GLFW.GLFW_MOUSE_BUTTON_RIGHT && sortButton.isMouseOver(mouseX, mouseY)) {
+            ClientConfig.WORKBENCH_SORT_DESCENDING.set(!sortDescending());
+            ClientConfig.WORKBENCH_SORT_DESCENDING.save();
+            updateSortButton();
+            refilter();
+            playClick();
+            return true;
+        }
+        if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT && isOverSyncButton(mouseX, mouseY)) {
+            SearchSyncMode.cycleConfig();
+            pushSearchToJei();
+            playClick();
+            return true;
         }
         BigItemStack entry = stockAt(mouseX, mouseY);
         if (entry != null && (button == GLFW.GLFW_MOUSE_BUTTON_LEFT || button == GLFW.GLFW_MOUSE_BUTTON_RIGHT)) {
@@ -487,6 +572,9 @@ public class LogisticsWorkbenchScreen extends AbstractContainerScreen<LogisticsW
             AllGuiTextures.STOCK_KEEPER_REQUEST_BODY.render(graphics, textureX, bodyY + row * ROW_HEIGHT);
         }
         renderFooter(graphics, textureX, y + FOOTER_Y);
+        if (JEI_LOADED) {
+            syncMode().buttonTexture.render(graphics, x + SYNC_BUTTON_X, headerY + SYNC_BUTTON_Y);
+        }
 
         // Title on the banner, and the search hint.
         graphics.drawString(font, title, x + WINDOW_WIDTH / 2 - font.width(title) / 2, headerY + 4, COLOR_TITLE,
@@ -762,11 +850,19 @@ public class LogisticsWorkbenchScreen extends AbstractContainerScreen<LogisticsW
      * Create's icon buttons keep their own tooltips, which only Create's screen base class draws.
      */
     private void renderWidgetTooltips(GuiGraphics graphics, int mouseX, int mouseY) {
-        for (IconButton button : new IconButton[] {orderButton, clearButton, sendButton, sortButton,
-                directionButton}) {
+        for (IconButton button : new IconButton[] {orderButton, clearButton, sendButton, sortButton}) {
             if (button.isHovered() && !button.getToolTip().isEmpty()) {
                 graphics.renderComponentTooltip(font, button.getToolTip(), mouseX, mouseY);
             }
+        }
+        // Create's own tooltip for its search sync button.
+        if (isOverSyncButton(mouseX, mouseY)) {
+            String key = "create.gui.stock_keeper.jei_sync." + syncMode().getSerializedName();
+            graphics.renderComponentTooltip(font, List.of(
+                    Component.translatable(key),
+                    Component.translatable(key + ".description").withStyle(ChatFormatting.GRAY),
+                    Component.translatable("create.gui.stock_keeper.click_to_cycle")
+                            .withStyle(ChatFormatting.DARK_GRAY, ChatFormatting.ITALIC)), mouseX, mouseY);
         }
     }
 

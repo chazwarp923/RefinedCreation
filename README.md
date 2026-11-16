@@ -91,9 +91,12 @@ Using it:
 
 - **Network stock** fills the top of the screen. Click an item to order it to the delivery address: left-click for
   one, right-click for half a stack, shift-click for a stack.
-- **Sorting:** the buttons either side of the search bar pick the sort order, like a Refined Storage grid. The left
-  one cycles between quantity, name and item ID; the right one switches between descending and ascending. The
-  choice is saved in `config/refinedcreation-client.toml`.
+- **Search:** right-click the search bar to clear it. With JEI installed, the button left of the search bar
+  syncs it with JEI's search, with the same modes as the Stock Keeper (both ways, from JEI only, to JEI only, or
+  off). The two share Create's `syncRecipeViewerSearch` setting.
+- **Sorting:** the button right of the search bar picks the sort order, like a Refined Storage grid. Left-click
+  cycles between quantity, name and item ID; right-click switches between descending and ascending. The choice is
+  saved in `config/refinedcreation-client.toml`.
 - **Crafting grid:** deliveries land in the **buffer** (the panel on the left), then move into the grid to fill the
   last recipe you crafted. Shift-click the result to craft as many as the buffer allows.
 - **Order** (+) orders whatever the buffer and grid are missing for one more craft of the current recipe. Shift
