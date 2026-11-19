@@ -1,7 +1,9 @@
 package tech.chazwarp923.refinedcreation.bridge;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.function.Supplier;
 
 import javax.annotation.Nullable;
@@ -13,6 +15,8 @@ import com.refinedmods.refinedstorage.api.resource.list.MutableResourceList;
 import com.refinedmods.refinedstorage.api.storage.Actor;
 import com.refinedmods.refinedstorage.api.storage.root.RootStorageListener;
 import com.refinedmods.refinedstorage.common.support.resource.ItemResource;
+import com.simibubi.create.content.logistics.packager.PackagerBlockEntity;
+import com.simibubi.create.content.logistics.packager.PackagingRequest;
 import com.simibubi.create.foundation.blockEntity.behaviour.inventory.VersionedInventoryWrapper;
 
 import net.minecraft.world.item.ItemStack;
@@ -30,6 +34,10 @@ import net.neoforged.neoforge.items.ItemStackHandler;
  * <p>
  * The slot layout is rebuilt at most once per game tick so slot indices stay stable while a packager iterates them.
  * Amounts are always read live from the network.
+ * <p>
+ * While a Packager packages an order out of the bridge, {@link #packageOrder} narrows extraction to the ordered
+ * items. The Packager tries every slot for each of a package's nine slots, so without this a large network would
+ * cost thousands of simulated network extractions per package.
  */
 public class NetworkItemHandler extends VersionedInventoryWrapper {
     private final Supplier<StorageNetworkComponent> storageSupplier;
@@ -47,6 +55,12 @@ public class NetworkItemHandler extends VersionedInventoryWrapper {
     private StorageNetworkComponent listenedStorage;
     private boolean dirty = true;
     private long lastRebuildTime = Long.MIN_VALUE;
+    private long lastSyncTime = Long.MIN_VALUE;
+    /**
+     * The items of the order being packaged, or {@code null} if extraction is unrestricted.
+     */
+    @Nullable
+    private Set<ItemResource> orderFilter;
     /**
      * Guards against the network calling back into this handler, e.g. if someone points an RS External Storage at
      * the bridge. Without it, such a setup would recurse forever.
@@ -106,9 +120,17 @@ public class NetworkItemHandler extends VersionedInventoryWrapper {
         incrementVersion();
     }
 
+    /**
+     * @return the network's storage. The network is looked up at most once per tick, because Packagers call into
+     * this handler once per slot.
+     */
     @Nullable
     private StorageNetworkComponent storage() {
-        syncNetwork();
+        long now = gameTimeSupplier.get();
+        if (now != lastSyncTime) {
+            lastSyncTime = now;
+            syncNetwork();
+        }
         return listenedStorage;
     }
 
@@ -219,7 +241,7 @@ public class NetworkItemHandler extends VersionedInventoryWrapper {
         ensureLayout();
         StorageNetworkComponent storage = listenedStorage;
         ItemResource resource = resourceAt(slot);
-        if (storage == null || resource == null) {
+        if (storage == null || resource == null || (orderFilter != null && !orderFilter.contains(resource))) {
             return ItemStack.EMPTY;
         }
         int maxStackSize = resource.toItemStack().getMaxStackSize();
@@ -252,6 +274,35 @@ public class NetworkItemHandler extends VersionedInventoryWrapper {
     @Override
     public void setStackInSlot(int slot, ItemStack stack) {
         // Intentionally a no-op.
+    }
+
+    /**
+     * @return the handler of the bridge this Packager targets, or {@code null} if it doesn't target one
+     */
+    @Nullable
+    public static NetworkItemHandler forPackager(@Nullable PackagerBlockEntity packager) {
+        if (packager == null || packager.targetInventory == null) {
+            return null;
+        }
+        return packager.targetInventory.getInventory() instanceof NetworkItemHandler handler ? handler : null;
+    }
+
+    /**
+     * Runs {@code packaging} with extraction limited to the items in {@code requests}. The Packager skips every
+     * other item anyway, so this only saves it from asking the network about them.
+     */
+    public void packageOrder(List<PackagingRequest> requests, Runnable packaging) {
+        Set<ItemResource> filter = new HashSet<>();
+        for (PackagingRequest request : requests) {
+            filter.add(ItemResource.ofItemStack(request.item()));
+        }
+        Set<ItemResource> previous = orderFilter;
+        orderFilter = filter;
+        try {
+            packaging.run();
+        } finally {
+            orderFilter = previous;
+        }
     }
 
     /**

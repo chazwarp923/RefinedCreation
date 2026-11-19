@@ -75,12 +75,8 @@ public class BridgeCrafting {
      */
     @Nullable
     public static BridgeCrafting forPackager(@Nullable PackagerBlockEntity packager) {
-        if (packager == null || packager.targetInventory == null) {
-            return null;
-        }
-        return packager.targetInventory.getInventory() instanceof NetworkItemHandler handler
-                ? handler.getCrafting()
-                : null;
+        NetworkItemHandler handler = NetworkItemHandler.forPackager(packager);
+        return handler == null ? null : handler.getCrafting();
     }
 
     /**
