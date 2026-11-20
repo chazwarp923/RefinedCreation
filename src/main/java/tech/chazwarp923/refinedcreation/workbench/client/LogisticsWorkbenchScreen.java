@@ -1,7 +1,6 @@
 package tech.chazwarp923.refinedcreation.workbench.client;
 
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 
@@ -27,7 +26,6 @@ import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.renderer.Rect2i;
 import net.minecraft.client.resources.sounds.SimpleSoundInstance;
-import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.sounds.SoundEvents;
@@ -39,6 +37,7 @@ import tech.chazwarp923.refinedcreation.ClientConfig;
 import tech.chazwarp923.refinedcreation.compat.jei.JeiSearchSync;
 import tech.chazwarp923.refinedcreation.workbench.LogisticsWorkbenchBlockEntity;
 import tech.chazwarp923.refinedcreation.workbench.LogisticsWorkbenchMenu;
+import tech.chazwarp923.refinedcreation.workbench.StockView;
 import tech.chazwarp923.refinedcreation.workbench.WorkbenchPackets;
 import tech.chazwarp923.refinedcreation.workbench.WorkbenchPackets.ActionPayload;
 import tech.chazwarp923.refinedcreation.workbench.WorkbenchPackets.AddressPayload;
@@ -179,6 +178,7 @@ public class LogisticsWorkbenchScreen extends AbstractContainerScreen<LogisticsW
     private IconButton sendButton;
     private IconButton sortButton;
 
+    private final StockView stockView = new StockView();
     private List<BigItemStack> filtered = List.of();
     private int seenStockVersion = -1;
     private String seenSearch = "";
@@ -314,15 +314,7 @@ public class LogisticsWorkbenchScreen extends AbstractContainerScreen<LogisticsW
     }
 
     private void refilter() {
-        String query = seenSearch.toLowerCase(Locale.ROOT).strip();
-        List<BigItemStack> result = new ArrayList<>();
-        for (BigItemStack entry : menu.getStock()) {
-            if (query.isEmpty() || entry.stack.getHoverName().getString().toLowerCase(Locale.ROOT).contains(query)) {
-                result.add(entry);
-            }
-        }
-        result.sort(sortComparator());
-        filtered = result;
+        filtered = stockView.view(menu.getStock(), seenSearch, sortMode(), sortDescending());
         scrollRow = Math.min(scrollRow, maxScroll());
     }
 
@@ -377,26 +369,6 @@ public class LogisticsWorkbenchScreen extends AbstractContainerScreen<LogisticsW
 
     private static boolean sortDescending() {
         return ClientConfig.WORKBENCH_SORT_DESCENDING.get();
-    }
-
-    /**
-     * The order for the stock list, as in a Refined Storage grid. Ties fall back to the name and then the item
-     * ID, so the order is stable from one sync to the next.
-     */
-    private static Comparator<BigItemStack> sortComparator() {
-        Comparator<BigItemStack> byName = Comparator.comparing(
-                (BigItemStack entry) -> entry.stack.getHoverName().getString(), String.CASE_INSENSITIVE_ORDER);
-        Comparator<BigItemStack> byId = Comparator.comparing(
-                (BigItemStack entry) -> BuiltInRegistries.ITEM.getKey(entry.stack.getItem()).toString());
-        Comparator<BigItemStack> primary = switch (sortMode()) {
-            case QUANTITY -> Comparator.comparingInt((BigItemStack entry) -> entry.count);
-            case NAME -> byName;
-            case ID -> byId;
-        };
-        if (sortDescending()) {
-            primary = primary.reversed();
-        }
-        return primary.thenComparing(byName).thenComparing(byId);
     }
 
     private void updateSortButton() {

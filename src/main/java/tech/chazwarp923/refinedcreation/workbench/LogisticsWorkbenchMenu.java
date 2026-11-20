@@ -7,6 +7,7 @@ import java.util.Optional;
 import javax.annotation.Nullable;
 
 import com.simibubi.create.content.logistics.BigItemStack;
+import com.simibubi.create.content.logistics.packager.InventorySummary;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.NonNullList;
@@ -38,7 +39,7 @@ import tech.chazwarp923.refinedcreation.workbench.WorkbenchPackets.StockPayload;
  * they're backed by throwaway containers that vanilla's slot sync fills.
  * <p>
  * The network stock list isn't made of slots. The server sends it to the client as a {@link StockPayload} when
- * the screen asks for it on opening, then every {@link #STOCK_SYNC_INTERVAL} ticks.
+ * the screen asks for it on opening, then every {@link #STOCK_SYNC_INTERVAL} ticks if it has changed.
  */
 public class LogisticsWorkbenchMenu extends AbstractContainerMenu {
     public static final int STOCK_SYNC_INTERVAL = 20;
@@ -94,6 +95,10 @@ public class LogisticsWorkbenchMenu extends AbstractContainerMenu {
     private long statusTime;
 
     private long lastStockSync = Long.MIN_VALUE / 2;
+    /** What the client was last sent, to skip periodic syncs that would change nothing. Server only. */
+    @Nullable
+    private InventorySummary lastSentStock;
+    private boolean lastSentTuned;
 
     /**
      * Server-side constructor.
@@ -276,7 +281,7 @@ public class LogisticsWorkbenchMenu extends AbstractContainerMenu {
         super.broadcastChanges();
         // Counted in game time: broadcastChanges also runs on every slot change, not just once per tick.
         if (player.level().getGameTime() - lastStockSync >= STOCK_SYNC_INTERVAL) {
-            sendStockNow();
+            sendStock(false);
         }
     }
 
@@ -284,17 +289,52 @@ public class LogisticsWorkbenchMenu extends AbstractContainerMenu {
      * Sends the network stock to the client and restarts the periodic sync from now.
      */
     void sendStockNow() {
+        sendStock(true);
+    }
+
+    /**
+     * @param force send even if the stock is what the client was last sent
+     */
+    private void sendStock(boolean force) {
         if (workbench == null || !(player instanceof ServerPlayer serverPlayer)
                 || !serverPlayer.connection.hasChannel(StockPayload.TYPE)) {
             return;
         }
         lastStockSync = player.level().getGameTime();
-        List<BigItemStack> stacks = new ArrayList<>();
-        for (BigItemStack entry : workbench.getNetworkStock(false).getStacks()) {
-            stacks.add(new BigItemStack(entry.stack.copyWithCount(1), entry.count));
+        InventorySummary summary = workbench.getNetworkStock(false);
+        boolean tuned = workbench.getFrequency() != null;
+        if (!force && tuned == lastSentTuned && isSameStock(summary, lastSentStock)) {
+            return;
         }
-        PacketDistributor.sendToPlayer(serverPlayer,
-                new StockPayload(containerId, workbench.getFrequency() != null, stacks));
+        List<BigItemStack> stacks = new ArrayList<>();
+        InventorySummary sent = new InventorySummary();
+        for (BigItemStack entry : summary.getStacks()) {
+            ItemStack stack = entry.stack.copyWithCount(1);
+            stacks.add(new BigItemStack(stack, entry.count));
+            sent.add(stack, entry.count);
+        }
+        lastSentStock = sent;
+        lastSentTuned = tuned;
+        PacketDistributor.sendToPlayer(serverPlayer, new StockPayload(containerId, tuned, stacks));
+    }
+
+    /**
+     * @return whether {@code current} holds exactly the items and counts of {@code previous}
+     */
+    public static boolean isSameStock(InventorySummary current, @Nullable InventorySummary previous) {
+        if (previous == null) {
+            return false;
+        }
+        List<BigItemStack> stacks = current.getStacks();
+        if (stacks.size() != previous.getStacks().size()) {
+            return false;
+        }
+        for (BigItemStack entry : stacks) {
+            if (previous.getCountOf(entry.stack) != entry.count) {
+                return false;
+            }
+        }
+        return true;
     }
 
     public BlockPos getPos() {
