@@ -1,8 +1,11 @@
 package tech.chazwarp923.refinedcreation.bridge;
 
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.Supplier;
 
@@ -32,8 +35,10 @@ import net.neoforged.neoforge.items.ItemStackHandler;
  * This extends Create's {@link VersionedInventoryWrapper} so Create's packagers cache their stock summary and only
  * rescan when the network reports a change, rather than walking every slot on every stock check.
  * <p>
- * The slot layout is rebuilt at most once per game tick so slot indices stay stable while a packager iterates them.
- * Amounts are always read live from the network.
+ * Each slot's stack is cached until the network reports a change to that item, so a Packager rescanning thousands
+ * of slots after one change only asks the network about the item that changed. The slot layout only changes when an
+ * item type joins the network, and then at most once per game tick, so slot indices stay stable while a Packager
+ * iterates them. An item that leaves the network keeps an empty slot until the next rebuild.
  * <p>
  * While a Packager packages an order out of the bridge, {@link #packageOrder} narrows extraction to the ordered
  * items. The Packager tries every slot for each of a package's nine slots, so without this a large network would
@@ -46,14 +51,24 @@ public class NetworkItemHandler extends VersionedInventoryWrapper {
     private final RootStorageListener listener = new RootStorageListener() {
         @Override
         public void changed(MutableResourceList.OperationResult change) {
-            onNetworkChanged();
+            onResourceChanged(change);
         }
     };
 
     private final List<ItemResource> slots = new ArrayList<>();
+    private final Map<ItemResource, Integer> slotIndex = new HashMap<>();
+    /**
+     * Per slot: what {@link #getStackInSlot} returns, or {@code null} until it is next read from the network.
+     */
+    private ItemStack[] stacks = new ItemStack[0];
+    /**
+     * Per slot: a one-item stack of the slot's item, made on first use, to copy extraction results from.
+     */
+    private ItemStack[] prototypes = new ItemStack[0];
     @Nullable
     private StorageNetworkComponent listenedStorage;
-    private boolean dirty = true;
+    private boolean layoutDirty = true;
+    private int layoutVersion;
     private long lastRebuildTime = Long.MIN_VALUE;
     private long lastSyncTime = Long.MIN_VALUE;
     /**
@@ -61,6 +76,11 @@ public class NetworkItemHandler extends VersionedInventoryWrapper {
      */
     @Nullable
     private Set<ItemResource> orderFilter;
+    /**
+     * Per slot: whether its item is in {@link #orderFilter}, for the layout {@link #orderSlotsVersion}.
+     */
+    private boolean[] orderSlots = new boolean[0];
+    private int orderSlotsVersion = -1;
     /**
      * Guards against the network calling back into this handler, e.g. if someone points an RS External Storage at
      * the bridge. Without it, such a setup would recurse forever.
@@ -99,7 +119,7 @@ public class NetworkItemHandler extends VersionedInventoryWrapper {
             current.addListener(listener);
         }
         listenedStorage = current;
-        onNetworkChanged();
+        invalidateAll();
     }
 
     /**
@@ -111,12 +131,37 @@ public class NetworkItemHandler extends VersionedInventoryWrapper {
             listenedStorage = null;
         }
         slots.clear();
-        dirty = true;
+        slotIndex.clear();
+        stacks = new ItemStack[0];
+        prototypes = new ItemStack[0];
+        layoutVersion++;
+        invalidateAll();
+    }
+
+    /**
+     * Forgets every cached stack and rebuilds the layout on next access, e.g. after switching networks.
+     */
+    private void invalidateAll() {
+        layoutDirty = true;
+        Arrays.fill(stacks, null);
         incrementVersion();
     }
 
-    private void onNetworkChanged() {
-        dirty = true;
+    /**
+     * Called by the network for every change to its contents.
+     */
+    private void onResourceChanged(MutableResourceList.OperationResult change) {
+        // Fluids and other resources don't appear in the item view.
+        if (!(change.resource() instanceof ItemResource item)) {
+            return;
+        }
+        Integer slot = slotIndex.get(item);
+        if (slot != null) {
+            stacks[slot] = null;
+        } else if (change.available()) {
+            // A new item type needs a slot.
+            layoutDirty = true;
+        }
         incrementVersion();
     }
 
@@ -135,31 +180,45 @@ public class NetworkItemHandler extends VersionedInventoryWrapper {
     }
 
     private void ensureLayout() {
-        StorageNetworkComponent storage = storage();
-        if (!dirty) {
-            return;
-        }
         long now = gameTimeSupplier.get();
-        if (now == lastRebuildTime) {
-            // Already rebuilt this tick; keep indices stable until the next one.
+        if (now != lastSyncTime) {
+            lastSyncTime = now;
+            syncNetwork();
+        }
+        if (!layoutDirty || now == lastRebuildTime) {
+            // Rebuilt at most once per tick, so indices stay stable until the next one.
             return;
         }
         lastRebuildTime = now;
-        dirty = false;
-        slots.clear();
-        if (storage == null) {
-            return;
-        }
-        busy = true;
-        try {
-            for (ResourceAmount resourceAmount : storage.getAll()) {
-                if (resourceAmount.resource() instanceof ItemResource item) {
-                    slots.add(item);
-                }
+        layoutDirty = false;
+        Map<ItemResource, ItemStack> oldPrototypes = new HashMap<>();
+        for (int i = 0; i < slots.size(); i++) {
+            if (prototypes[i] != null) {
+                oldPrototypes.put(slots.get(i), prototypes[i]);
             }
-        } finally {
-            busy = false;
         }
+        slots.clear();
+        slotIndex.clear();
+        StorageNetworkComponent storage = listenedStorage;
+        if (storage != null) {
+            busy = true;
+            try {
+                for (ResourceAmount resourceAmount : storage.getAll()) {
+                    if (resourceAmount.resource() instanceof ItemResource item) {
+                        slotIndex.put(item, slots.size());
+                        slots.add(item);
+                    }
+                }
+            } finally {
+                busy = false;
+            }
+        }
+        stacks = new ItemStack[slots.size()];
+        prototypes = new ItemStack[slots.size()];
+        for (int i = 0; i < slots.size(); i++) {
+            prototypes[i] = oldPrototypes.get(slots.get(i));
+        }
+        layoutVersion++;
     }
 
     @Nullable
@@ -168,6 +227,33 @@ public class NetworkItemHandler extends VersionedInventoryWrapper {
             return null;
         }
         return slots.get(slot);
+    }
+
+    /**
+     * @return a one-item stack of the slot's item. Never hand this out; copy it.
+     */
+    private ItemStack prototype(int slot) {
+        ItemStack prototype = prototypes[slot];
+        if (prototype == null) {
+            prototype = slots.get(slot).toItemStack(1);
+            prototypes[slot] = prototype;
+        }
+        return prototype;
+    }
+
+    /**
+     * @return whether the order being packaged includes the slot's item. Only valid while {@link #orderFilter} is
+     * set.
+     */
+    private boolean orderIncludes(int slot) {
+        if (orderSlotsVersion != layoutVersion) {
+            orderSlots = new boolean[slots.size()];
+            for (int i = 0; i < slots.size(); i++) {
+                orderSlots[i] = orderFilter.contains(slots.get(i));
+            }
+            orderSlotsVersion = layoutVersion;
+        }
+        return slot >= 0 && slot < orderSlots.length && orderSlots[slot];
     }
 
     private static Action action(boolean simulate) {
@@ -179,7 +265,10 @@ public class NetworkItemHandler extends VersionedInventoryWrapper {
         if (busy) {
             return 0;
         }
-        ensureLayout();
+        // While packaging, the layout is settled for the tick; the Packager asks for the size on every slot.
+        if (orderFilter == null) {
+            ensureLayout();
+        }
         // One trailing empty slot so that slot-hunting inserters always find somewhere to put items.
         return slots.size() + 1;
     }
@@ -195,6 +284,11 @@ public class NetworkItemHandler extends VersionedInventoryWrapper {
         if (storage == null || resource == null) {
             return ItemStack.EMPTY;
         }
+        // Callers must not modify the returned stack (see IItemHandler#getStackInSlot), so it can be cached.
+        ItemStack cached = stacks[slot];
+        if (cached != null) {
+            return cached;
+        }
         long amount;
         busy = true;
         try {
@@ -202,10 +296,11 @@ public class NetworkItemHandler extends VersionedInventoryWrapper {
         } finally {
             busy = false;
         }
-        if (amount <= 0) {
-            return ItemStack.EMPTY;
-        }
-        return resource.toItemStack(Math.min(amount, Integer.MAX_VALUE));
+        cached = amount <= 0
+                ? ItemStack.EMPTY
+                : prototype(slot).copyWithCount((int) Math.min(amount, Integer.MAX_VALUE));
+        stacks[slot] = cached;
+        return cached;
     }
 
     @Override
@@ -238,13 +333,20 @@ public class NetworkItemHandler extends VersionedInventoryWrapper {
         if (busy || amount <= 0) {
             return ItemStack.EMPTY;
         }
-        ensureLayout();
+        if (orderFilter != null) {
+            // The Packager tries every slot for each of a package's slots; answer the others without the network.
+            if (!orderIncludes(slot)) {
+                return ItemStack.EMPTY;
+            }
+        } else {
+            ensureLayout();
+        }
         StorageNetworkComponent storage = listenedStorage;
         ItemResource resource = resourceAt(slot);
-        if (storage == null || resource == null || (orderFilter != null && !orderFilter.contains(resource))) {
+        if (storage == null || resource == null) {
             return ItemStack.EMPTY;
         }
-        int maxStackSize = resource.toItemStack().getMaxStackSize();
+        int maxStackSize = prototype(slot).getMaxStackSize();
         long extracted;
         busy = true;
         try {
@@ -255,7 +357,7 @@ public class NetworkItemHandler extends VersionedInventoryWrapper {
         if (extracted <= 0) {
             return ItemStack.EMPTY;
         }
-        return resource.toItemStack(extracted);
+        return prototype(slot).copyWithCount((int) extracted);
     }
 
     @Override
@@ -297,11 +399,18 @@ public class NetworkItemHandler extends VersionedInventoryWrapper {
             filter.add(ItemResource.ofItemStack(request.item()));
         }
         Set<ItemResource> previous = orderFilter;
+        boolean[] previousSlots = orderSlots;
+        int previousVersion = orderSlotsVersion;
+        // Settle the layout for this tick first: while the filter is set, the Packager's calls skip that check.
+        ensureLayout();
         orderFilter = filter;
+        orderSlotsVersion = -1;
         try {
             packaging.run();
         } finally {
             orderFilter = previous;
+            orderSlots = previousSlots;
+            orderSlotsVersion = previousVersion;
         }
     }
 

@@ -1,5 +1,9 @@
 package tech.chazwarp923.refinedcreation.gametest;
 
+import com.refinedmods.refinedstorage.api.core.Action;
+import com.refinedmods.refinedstorage.api.network.storage.StorageNetworkComponent;
+import com.refinedmods.refinedstorage.api.storage.Actor;
+import com.refinedmods.refinedstorage.common.support.resource.ItemResource;
 import com.simibubi.create.AllBlocks;
 import com.simibubi.create.content.logistics.box.PackageItem;
 import com.simibubi.create.content.logistics.packager.PackagerBlock;
@@ -28,6 +32,7 @@ import net.neoforged.neoforge.items.IItemHandler;
 import net.neoforged.neoforge.items.ItemStackHandler;
 import tech.chazwarp923.refinedcreation.RefinedCreation;
 import tech.chazwarp923.refinedcreation.bridge.LogisticsBridgeBlock;
+import tech.chazwarp923.refinedcreation.bridge.LogisticsBridgeBlockEntity;
 import tech.chazwarp923.refinedcreation.registry.ModBlocks;
 
 @GameTestHolder(RefinedCreation.MODID)
@@ -130,6 +135,90 @@ public class LogisticsBridgeTests {
                     }
                 })
                 .thenSucceed();
+    }
+
+    /**
+     * The bridge caches each slot's stack, so every change made straight to the network, bypassing the bridge, must
+     * still show up: amount changes at once, an item that runs out as an empty slot, and a new item type by the
+     * next tick. The Packager's stock summary must follow too.
+     */
+    @GameTest(template = "empty_6x3x3", timeoutTicks = 200)
+    public static void bridgeViewFollowsNetworkChanges(GameTestHelper helper) {
+        helper.setBlock(CONTROLLER, rsBlock("creative_controller"));
+        helper.setBlock(STORAGE, rsBlock("creative_storage_block"));
+        helper.setBlock(BRIDGE, ModBlocks.LOGISTICS_BRIDGE.get());
+        helper.setBlock(PACKAGER, AllBlocks.PACKAGER.getDefaultState().setValue(PackagerBlock.FACING, Direction.EAST));
+        ItemResource iron = new ItemResource(Items.IRON_INGOT);
+        ItemResource gold = new ItemResource(Items.GOLD_INGOT);
+        ItemResource diamond = new ItemResource(Items.DIAMOND);
+        ItemStack ironStack = new ItemStack(Items.IRON_INGOT);
+        ItemStack goldStack = new ItemStack(Items.GOLD_INGOT);
+        int[] slots = new int[3];
+
+        helper.startSequence()
+                .thenWaitUntil(() -> helper.assertBlockProperty(BRIDGE, LogisticsBridgeBlock.ACTIVE, true))
+                .thenWaitUntil(() -> helper.assertTrue(packager(helper).targetInventory.hasInventory(),
+                        "Packager has not found the bridge inventory"))
+                .thenExecute(() -> {
+                    storage(helper).insert(iron, 10, Action.EXECUTE, Actor.EMPTY);
+                    storage(helper).insert(gold, 5, Action.EXECUTE, Actor.EMPTY);
+                })
+                .thenIdle(1)
+                .thenExecute(() -> {
+                    IItemHandler handler = bridgeHandler(helper);
+                    slots[0] = slotOf(handler, ironStack);
+                    slots[1] = slotOf(handler, goldStack);
+                    slots[2] = handler.getSlots();
+                    helper.assertTrue(handler.getStackInSlot(slots[0]).getCount() == 10, "Bridge shows "
+                            + handler.getStackInSlot(slots[0]) + " instead of 10 iron");
+                    helper.assertTrue(packager(helper).getAvailableItems().getCountOf(ironStack) == 10,
+                            "Packager summary should list 10 iron");
+
+                    // Straight into the network: the cached slot must update in the same tick.
+                    storage(helper).insert(iron, 3, Action.EXECUTE, Actor.EMPTY);
+                    helper.assertTrue(handler.getStackInSlot(slots[0]).getCount() == 13, "Bridge shows "
+                            + handler.getStackInSlot(slots[0]) + " instead of 13 iron");
+                    helper.assertTrue(packager(helper).getAvailableItems().getCountOf(ironStack) == 13,
+                            "Packager summary should list 13 iron");
+
+                    // Gold runs out: its slot empties but stays, so the other slots keep their indices.
+                    storage(helper).extract(gold, 5, Action.EXECUTE, Actor.EMPTY);
+                    helper.assertTrue(handler.getStackInSlot(slots[1]).isEmpty(), "Gold slot should be empty");
+                    helper.assertTrue(packager(helper).getAvailableItems().getCountOf(goldStack) == 0,
+                            "Packager summary should list no gold");
+                    storage(helper).insert(gold, 2, Action.EXECUTE, Actor.EMPTY);
+                    helper.assertTrue(handler.getStackInSlot(slots[1]).getCount() == 2, "Bridge shows "
+                            + handler.getStackInSlot(slots[1]) + " instead of 2 gold");
+
+                    storage(helper).insert(diamond, 7, Action.EXECUTE, Actor.EMPTY);
+                })
+                .thenIdle(1)
+                .thenExecute(() -> {
+                    IItemHandler handler = bridgeHandler(helper);
+                    helper.assertTrue(handler.getSlots() == slots[2] + 1, "Bridge should have one more slot for"
+                            + " diamonds, has " + handler.getSlots() + " instead of " + slots[2]);
+                    assertDiamonds(helper, 7);
+                    helper.assertTrue(packager(helper).getAvailableItems().getCountOf(new ItemStack(Items.DIAMOND))
+                            == 7, "Packager summary should list 7 diamonds");
+                    helper.assertTrue(packager(helper).getAvailableItems().getCountOf(ironStack) == 13,
+                            "Packager summary should still list 13 iron");
+                })
+                .thenSucceed();
+    }
+
+    private static StorageNetworkComponent storage(GameTestHelper helper) {
+        LogisticsBridgeBlockEntity bridge = helper.getBlockEntity(BRIDGE);
+        helper.assertTrue(bridge.getNetwork() != null, "Bridge has no network");
+        return bridge.getNetwork().getComponent(StorageNetworkComponent.class);
+    }
+
+    private static int slotOf(IItemHandler handler, ItemStack item) {
+        for (int slot = 0; slot < handler.getSlots(); slot++) {
+            if (ItemStack.isSameItemSameComponents(handler.getStackInSlot(slot), item)) {
+                return slot;
+            }
+        }
+        throw new IllegalStateException("No slot holds " + item);
     }
 
     private static void packageDiamondOrder(GameTestHelper helper, int requested) {
