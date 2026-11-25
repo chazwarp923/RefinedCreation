@@ -25,6 +25,8 @@ import com.simibubi.create.content.logistics.packager.InventorySummary;
 import com.simibubi.create.content.logistics.packager.PackagerBlockEntity;
 import com.simibubi.create.content.logistics.packager.PackagingRequest;
 
+import net.minecraft.world.item.Item;
+
 import tech.chazwarp923.refinedcreation.Config;
 import tech.chazwarp923.refinedcreation.RefinedCreation;
 
@@ -91,7 +93,18 @@ public class BridgeCrafting {
             return cachedAugmented;
         }
         InventorySummary augmented = new InventorySummary();
-        augmented.add(base);
+        // Copy the entries straight across: they are already one per item, and InventorySummary.add would
+        // compare each one with every other variant of its item. The entries are copied, not shared, because
+        // the craftables below add to them. This skips the summary's private total count, which Create only reads
+        // on its own request tallies, never on a link's summary.
+        Map<Item, List<BigItemStack>> items = augmented.getItemMap();
+        base.getItemMap().forEach((item, entries) -> {
+            List<BigItemStack> copies = new ArrayList<>(entries.size());
+            for (BigItemStack entry : entries) {
+                copies.add(new BigItemStack(entry.stack, entry.count));
+            }
+            items.put(item, copies);
+        });
         for (ItemResource craftable : craftables) {
             // Adding INF on top of a real count stays within int range and still reads as infinite.
             augmented.add(craftable.toItemStack(1), BigItemStack.INF);
