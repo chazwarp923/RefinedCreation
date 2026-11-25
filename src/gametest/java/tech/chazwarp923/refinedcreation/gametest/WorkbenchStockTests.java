@@ -7,9 +7,11 @@ import java.util.Locale;
 import com.simibubi.create.content.logistics.BigItemStack;
 import com.simibubi.create.content.logistics.packager.InventorySummary;
 
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -95,6 +97,48 @@ public class WorkbenchStockTests {
                 summary(new ItemStack(Items.DIAMOND), 10, ItemStack.EMPTY, 0), sent),
                 "An item ran out");
         helper.succeed();
+    }
+
+    /**
+     * The view reuses the previous update's names and order, so after every kind of update it must show exactly
+     * what a fresh view of the same stock shows: counts that change the order, items that run out or arrive, and
+     * a change of sort.
+     */
+    @GameTest(template = "empty_6x3x3")
+    public static void stockViewUpdatesMatchFreshView(GameTestHelper helper) {
+        StockView view = new StockView();
+        List<BigItemStack> stock = everyItem();
+        assertSameView(helper, view, stock, WorkbenchSort.QUANTITY, true, "first stock");
+
+        // Counts shift, a few items run out, some new named variants arrive, all as new stack objects.
+        List<BigItemStack> update = new ArrayList<>();
+        for (int i = 0; i < stock.size(); i++) {
+            if (i % 50 != 7) {
+                BigItemStack entry = stock.get(i);
+                update.add(new BigItemStack(entry.stack.copy(), (entry.count * 7 + i) % 6000 + 1));
+            }
+        }
+        for (int i = 0; i < 40; i++) {
+            ItemStack named = new ItemStack(Items.PAPER);
+            named.set(DataComponents.CUSTOM_NAME, Component.literal("Note " + i));
+            update.add(i * 31 % update.size(), new BigItemStack(named, 1 + i));
+        }
+        assertSameView(helper, view, update, WorkbenchSort.QUANTITY, true, "updated stock");
+        assertSameView(helper, view, update, WorkbenchSort.NAME, false, "updated stock by name");
+        assertSameView(helper, view, new ArrayList<>(stock), WorkbenchSort.ID, false, "original stock by ID");
+        helper.succeed();
+    }
+
+    private static void assertSameView(GameTestHelper helper, StockView view, List<BigItemStack> stock,
+                                       WorkbenchSort sort, boolean descending, String what) {
+        List<BigItemStack> shown = view.view(stock, "", sort, descending);
+        List<BigItemStack> fresh = new StockView().view(stock, "", sort, descending);
+        helper.assertTrue(shown.size() == fresh.size(), what + ": shows " + shown.size() + " of " + fresh.size());
+        for (int i = 0; i < shown.size(); i++) {
+            helper.assertTrue(shown.get(i) == fresh.get(i), what + ": entry " + i + " is " + shown.get(i).stack
+                    + " x" + shown.get(i).count + ", a fresh view has " + fresh.get(i).stack + " x"
+                    + fresh.get(i).count);
+        }
     }
 
     private static InventorySummary summary(ItemStack first, int firstCount, ItemStack second, int secondCount) {

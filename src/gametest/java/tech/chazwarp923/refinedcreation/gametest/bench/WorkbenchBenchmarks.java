@@ -79,7 +79,6 @@ final class WorkbenchBenchmarks {
                     received.addAll(StockPayload.STREAM_CODEC.decode(buf).stock());
                     buf.release();
                 });
-        encoded.release();
         helper.assertTrue(received.size() == sent.stacks().size(), "Decoded " + received.size() + " entries");
 
         // W3: ordering one item from the stock list.
@@ -128,8 +127,21 @@ final class WorkbenchBenchmarks {
         StockView view = new StockView();
         List<BigItemStack> stock = sent.stacks();
         List<BigItemStack>[] shown = new List[1];
-        bench.measure("W6a", "Client stock list: new stock (names + sort)", 5, 30, null,
-                () -> shown[0] = view.view(new ArrayList<>(stock), "", WorkbenchSort.NAME, false));
+        // Every update is decoded from a packet, so each one brings new stack objects.
+        List<BigItemStack>[] update = new List[1];
+        bench.measure("W6a", "Client stock list: stock update (names + sort)", 5, 30,
+                () -> {
+                    RegistryFriendlyByteBuf buf = new RegistryFriendlyByteBuf(encoded.copy(),
+                            net.level().registryAccess());
+                    update[0] = StockPayload.STREAM_CODEC.decode(buf).stock();
+                    buf.release();
+                },
+                () -> shown[0] = view.view(update[0], "", WorkbenchSort.NAME, false));
+        encoded.release();
+        List<BigItemStack> fresh = new StockView().view(update[0], "", WorkbenchSort.NAME, false);
+        helper.assertTrue(shown[0].equals(fresh), "An updated stock list differs from a fresh one");
+        bench.measure("W6a1", "Client stock list: first stock after opening (names + sort)", 5, 30, null,
+                () -> shown[0] = new StockView().view(stock, "", WorkbenchSort.NAME, false));
         helper.assertTrue(shown[0].size() == stock.size(), "Stock list shows " + shown[0].size() + " entries");
         List<BigItemStack> fixed = new ArrayList<>(stock);
         view.view(fixed, "", WorkbenchSort.NAME, false);
