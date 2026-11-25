@@ -18,10 +18,13 @@ import com.refinedmods.refinedstorage.api.resource.list.MutableResourceList;
 import com.refinedmods.refinedstorage.api.storage.Actor;
 import com.refinedmods.refinedstorage.api.storage.root.RootStorageListener;
 import com.refinedmods.refinedstorage.common.support.resource.ItemResource;
+import com.simibubi.create.content.logistics.BigItemStack;
+import com.simibubi.create.content.logistics.packager.InventorySummary;
 import com.simibubi.create.content.logistics.packager.PackagerBlockEntity;
 import com.simibubi.create.content.logistics.packager.PackagingRequest;
 import com.simibubi.create.foundation.blockEntity.behaviour.inventory.VersionedInventoryWrapper;
 
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.items.ItemStackHandler;
 
@@ -431,6 +434,31 @@ public class NetworkItemHandler extends VersionedInventoryWrapper {
      */
     void invalidateSummary() {
         incrementVersion();
+    }
+
+    /**
+     * Adds every slot to {@code summary}, as Create's Packager does slot by slot, but without comparing each
+     * stack to the other variants of its item: every slot holds a different resource, so each becomes its own
+     * entry. Called from {@code PackagerBlockEntityMixin} in place of the Packager's own loop.
+     */
+    public void summarizeInto(InventorySummary summary) {
+        Map<Item, List<BigItemStack>> items = summary.getItemMap();
+        int total = summary.getTotalCount();
+        int slotCount = getSlots();
+        for (int slot = 0; slot < slotCount; slot++) {
+            ItemStack stack = getStackInSlot(slot);
+            if (stack.isEmpty()) {
+                continue;
+            }
+            int count = stack.getCount();
+            // As InventorySummary.add: oversized stacks are stored as a single item, the rest as they are.
+            ItemStack stored = count > stack.getMaxStackSize() ? stack.copyWithCount(1) : stack;
+            items.computeIfAbsent(stack.getItem(), item -> new ArrayList<>()).add(new BigItemStack(stored, count));
+            if (total < BigItemStack.INF) {
+                total += count;
+            }
+        }
+        SummaryMerge.setTotalCount(summary, total);
     }
 
     /**

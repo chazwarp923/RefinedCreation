@@ -5,10 +5,13 @@ import com.refinedmods.refinedstorage.api.network.storage.StorageNetworkComponen
 import com.refinedmods.refinedstorage.api.storage.Actor;
 import com.refinedmods.refinedstorage.common.support.resource.ItemResource;
 import com.simibubi.create.AllBlocks;
+import com.simibubi.create.content.logistics.BigItemStack;
 import com.simibubi.create.content.logistics.box.PackageItem;
+import com.simibubi.create.content.logistics.packager.InventorySummary;
 import com.simibubi.create.content.logistics.packager.PackagerBlock;
 import com.simibubi.create.content.logistics.packager.PackagerBlockEntity;
 import com.simibubi.create.content.logistics.packager.PackagingRequest;
+import com.simibubi.create.foundation.item.ItemHelper;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -17,9 +20,11 @@ import org.apache.commons.lang3.mutable.MutableBoolean;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -33,6 +38,7 @@ import net.neoforged.neoforge.items.ItemStackHandler;
 import tech.chazwarp923.refinedcreation.RefinedCreation;
 import tech.chazwarp923.refinedcreation.bridge.LogisticsBridgeBlock;
 import tech.chazwarp923.refinedcreation.bridge.LogisticsBridgeBlockEntity;
+import tech.chazwarp923.refinedcreation.bridge.SummaryMerge;
 import tech.chazwarp923.refinedcreation.registry.ModBlocks;
 
 @GameTestHolder(RefinedCreation.MODID)
@@ -204,6 +210,84 @@ public class LogisticsBridgeTests {
                             "Packager summary should still list 13 iron");
                 })
                 .thenSucceed();
+    }
+
+    /**
+     * The fast paths that the mixins add for a bridge give what Create's own code would: the Packager's summary,
+     * the network summary merge, and filtered extraction.
+     */
+    @GameTest(template = "empty_6x3x3", timeoutTicks = 200)
+    public static void fastPathsMatchCreate(GameTestHelper helper) {
+        helper.setBlock(CONTROLLER, rsBlock("creative_controller"));
+        helper.setBlock(STORAGE, rsBlock("creative_storage_block"));
+        helper.setBlock(BRIDGE, ModBlocks.LOGISTICS_BRIDGE.get());
+        helper.setBlock(PACKAGER, AllBlocks.PACKAGER.getDefaultState().setValue(PackagerBlock.FACING, Direction.EAST));
+        ItemStack iron = new ItemStack(Items.IRON_INGOT);
+        ItemStack namedIron = new ItemStack(Items.IRON_INGOT);
+        namedIron.set(DataComponents.CUSTOM_NAME, Component.literal("Special"));
+        ItemStack gold = new ItemStack(Items.GOLD_INGOT);
+
+        helper.startSequence()
+                .thenWaitUntil(() -> helper.assertBlockProperty(BRIDGE, LogisticsBridgeBlock.ACTIVE, true))
+                .thenWaitUntil(() -> helper.assertTrue(packager(helper).targetInventory.hasInventory(),
+                        "Packager has not found the bridge inventory"))
+                .thenExecute(() -> {
+                    storage(helper).insert(ItemResource.ofItemStack(iron), 10, Action.EXECUTE, Actor.EMPTY);
+                    storage(helper).insert(ItemResource.ofItemStack(namedIron), 7, Action.EXECUTE, Actor.EMPTY);
+                    storage(helper).insert(ItemResource.ofItemStack(gold), 500, Action.EXECUTE, Actor.EMPTY);
+                })
+                .thenIdle(1)
+                .thenExecute(() -> {
+                    IItemHandler handler = bridgeHandler(helper);
+                    InventorySummary expected = new InventorySummary();
+                    for (int slot = 0; slot < handler.getSlots(); slot++) {
+                        expected.add(handler.getStackInSlot(slot));
+                    }
+                    InventorySummary actual = packager(helper).getAvailableItems();
+                    assertSameSummary(helper, expected, actual, "Packager summary");
+
+                    // A merge into a summary that already has some of the items, and one that has none.
+                    InventorySummary other = new InventorySummary();
+                    other.add(iron, 3);
+                    other.add(new ItemStack(Items.DIAMOND), 4);
+                    other.contributingLinks = 1;
+                    actual.contributingLinks = 1;
+                    InventorySummary slow = new InventorySummary();
+                    slow.add(other);
+                    slow.add(actual);
+                    InventorySummary fast = new InventorySummary();
+                    SummaryMerge.add(fast, other);
+                    SummaryMerge.add(fast, actual);
+                    assertSameSummary(helper, slow, fast, "Merged summary");
+                    helper.assertTrue(fast.contributingLinks == 2, "Merged summary counts "
+                            + fast.contributingLinks + " links");
+                    helper.assertTrue(actual.getCountOf(iron) == 10, "Merging changed the source summary");
+
+                    // Filtered extraction still finds the one matching variant, and nothing for no match.
+                    ItemStack found = ItemHelper.extract(handler,
+                            stack -> ItemStack.isSameItemSameComponents(stack, namedIron), true);
+                    helper.assertTrue(ItemStack.isSameItemSameComponents(found, namedIron) && found.getCount() == 7,
+                            "Filtered extract found " + found);
+                    helper.assertTrue(ItemHelper.extract(handler, stack -> stack.is(Items.DIAMOND), true).isEmpty(),
+                            "Filtered extract found something for no match");
+                    ItemStack taken = ItemHelper.extract(handler, stack -> stack.is(Items.GOLD_INGOT), 64, false);
+                    helper.assertTrue(taken.getCount() == 64, "Exact extract took " + taken);
+                    helper.assertTrue(storage(helper).get(ItemResource.ofItemStack(gold)) == 436,
+                            "Network should hold 436 gold after the extract");
+                })
+                .thenSucceed();
+    }
+
+    private static void assertSameSummary(GameTestHelper helper, InventorySummary expected, InventorySummary actual,
+                                          String what) {
+        helper.assertTrue(expected.getStacks().size() == actual.getStacks().size(), what + " lists "
+                + actual.getStacks().size() + " entries instead of " + expected.getStacks().size());
+        for (BigItemStack entry : expected.getStacks()) {
+            helper.assertTrue(actual.getCountOf(entry.stack) == entry.count, what + " lists "
+                    + actual.getCountOf(entry.stack) + " of " + entry.stack + " instead of " + entry.count);
+        }
+        helper.assertTrue(expected.getTotalCount() == actual.getTotalCount(), what + " totals "
+                + actual.getTotalCount() + " instead of " + expected.getTotalCount());
     }
 
     private static StorageNetworkComponent storage(GameTestHelper helper) {

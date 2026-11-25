@@ -23,8 +23,9 @@ Measured on 2026-11-25. Three builds were run back to back, twice each, and each
 runs' medians:
 
 - **Baseline:** `ac534fb`, before the optimization pass
-- **main:** `0b684f2`, after it
-- **Mixin branch:** `perf/create-mixins` (`7acf377`), an unmerged experiment that adds mixin fast paths into Create
+- **main:** `0b684f2`, after the optimizations in Refined Creation's own code
+- **Mixin branch:** main plus the mixin fast paths into Create, as later committed in "Add mixin fast paths into
+  Create for large bridge networks"
 
 Times vary by up to about 1.5× between runs on the test machine, so treat changes under about 1.2× as noise.
 Allocations are bytes per operation from the first run of each build. A dash means the benchmark didn't exist in

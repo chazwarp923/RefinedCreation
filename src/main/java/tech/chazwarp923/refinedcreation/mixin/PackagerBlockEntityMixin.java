@@ -9,9 +9,13 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
+import com.llamalad7.mixinextras.sugar.Local;
+import com.simibubi.create.content.logistics.packager.InventorySummary;
 import com.simibubi.create.content.logistics.packager.PackagerBlockEntity;
 import com.simibubi.create.content.logistics.packager.PackagingRequest;
 
+import net.neoforged.neoforge.items.IItemHandler;
 import tech.chazwarp923.refinedcreation.bridge.BridgeCrafting;
 import tech.chazwarp923.refinedcreation.bridge.NetworkItemHandler;
 
@@ -31,6 +35,24 @@ public abstract class PackagerBlockEntityMixin {
         } else {
             handler.packageOrder(queuedRequests, () -> original.call(queuedRequests));
         }
+    }
+
+    /**
+     * Builds the Packager's stock summary of a Logistics Bridge in one pass. Create's own loop adds each slot by
+     * comparing it with every variant of its item already listed; the bridge's slots are all different, so this
+     * skips that, then reports no slots left so Create's loop does nothing.
+     */
+    @WrapOperation(method = "getAvailableItems", at = @At(value = "INVOKE",
+            target = "Lnet/neoforged/neoforge/items/IItemHandler;getSlots()I"))
+    private int refinedcreation$summarizeBridge(IItemHandler inventory, Operation<Integer> original,
+                                                @Local InventorySummary availableItems) {
+        if (inventory instanceof NetworkItemHandler handler) {
+            if (availableItems.isEmpty()) {
+                handler.summarizeInto(availableItems);
+            }
+            return 0;
+        }
+        return original.call(inventory);
     }
 
     @Inject(method = "attemptToSend", at = @At("HEAD"), cancellable = true)

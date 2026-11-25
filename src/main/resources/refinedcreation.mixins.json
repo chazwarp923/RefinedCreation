@@ -4,6 +4,9 @@
   "package": "tech.chazwarp923.refinedcreation.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
+    "InventorySummaryAccessor",
+    "ItemHelperMixin",
+    "LogisticsManagerMixin",
     "PackagerBlockEntityMixin",
     "PackagerLinkBlockEntityMixin"
   ],
