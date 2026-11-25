@@ -143,7 +143,7 @@ public final class WorkbenchPackets {
      * Client -> server: lay a recipe out in the grid (JEI recipe transfer). Holds the acceptable items for each
      * of the 9 grid slots, in grid order.
      */
-    public record TransferPayload(int containerId, List<List<ItemStack>> options, boolean max)
+    public record TransferPayload(int containerId, List<List<ItemStack>> options, boolean max, int crafts)
             implements CustomPacketPayload {
         /** Caps the alternatives per slot, so a huge tag can't produce an oversized packet. */
         public static final int MAX_OPTIONS_PER_SLOT = 64;
@@ -156,6 +156,7 @@ public final class WorkbenchPackets {
                                 .apply(ByteBufCodecs.list(LogisticsWorkbenchBlockEntity.GRID_SLOTS)),
                         TransferPayload::options,
                         ByteBufCodecs.BOOL, TransferPayload::max,
+                        ByteBufCodecs.VAR_INT, TransferPayload::crafts,
                         TransferPayload::new);
 
         @Override
@@ -181,7 +182,7 @@ public final class WorkbenchPackets {
                         menu -> menu.handleAction(payload.action(), payload.amount())));
         registrar.playToServer(TransferPayload.TYPE, TransferPayload.STREAM_CODEC, (payload, context) ->
                 withMenu(context, payload.containerId(),
-                        menu -> menu.handleTransfer(payload.options(), payload.max())));
+                        menu -> menu.handleTransfer(payload.options(), payload.max(), payload.crafts())));
         registrar.playToServer(AddressPayload.TYPE, AddressPayload.STREAM_CODEC, (payload, context) ->
                 withMenu(context, payload.containerId(),
                         menu -> menu.handleAddress(payload.isReturn(), payload.address())));

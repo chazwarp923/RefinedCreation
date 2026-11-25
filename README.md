@@ -90,7 +90,8 @@ Setup:
 Using it:
 
 - **Network stock** fills the top of the screen. Click an item to order it to the delivery address: left-click for
-  one, right-click for half a stack, shift-click for a stack.
+  one, right-click for half a stack, shift-click for a stack. Ctrl-click or middle-click an item to type an exact
+  amount (up to 10,000), or step it with the − and + buttons or the scroll wheel (Shift steps by 16, Ctrl by 64).
 - **Search:** right-click the search bar to clear it. With JEI installed, the button left of the search bar
   syncs it with JEI's search, with the same modes as the Stock Keeper (both ways, from JEI only, to JEI only, or
   off). The two share Create's `syncRecipeViewerSearch` setting.
@@ -100,11 +101,12 @@ Using it:
 - **Crafting grid:** deliveries land in the **buffer** (the panel on the left), then move into the grid to fill the
   last recipe you crafted. Shift-click the result to craft as many as the buffer allows.
 - **Order** (+) orders whatever the buffer and grid are missing for one more craft of the current recipe. Shift
-  orders for 16 crafts, Ctrl for 64. **Clear** (trash) empties the grid into the buffer and forgets the recipe.
+  orders for 16 crafts, Ctrl for 64; right-click it to type any number of crafts up to 999. **Clear** (trash) empties the grid into the buffer and forgets the recipe.
 - **Returns:** put items on the shelf at the bottom and press **Send** to package them back to the network. They go
   to the **Return to** address, or to the address on the Packager's sign if that field is blank.
 - **JEI:** the "+" button on a crafting recipe lays it out in the grid. Ingredients come from the buffer, then your
   inventory; anything only on the network is ordered. Slots that will be ordered are highlighted orange.
+  Ctrl-click "+" to choose how many crafts to order ingredients for before the recipe is placed.
 
 ## Notes
 

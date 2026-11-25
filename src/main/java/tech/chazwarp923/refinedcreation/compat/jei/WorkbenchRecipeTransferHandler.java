@@ -21,6 +21,7 @@ import mezz.jei.api.recipe.transfer.IRecipeTransferHandler;
 import mezz.jei.api.recipe.transfer.IRecipeTransferHandlerHelper;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.MenuType;
@@ -44,6 +45,9 @@ import tech.chazwarp923.refinedcreation.workbench.WorkbenchPackets.TransferPaylo
  * are highlighted orange as a warning.</li>
  * <li>An ingredient is nowhere to be found: the button is disabled and those slots are highlighted red.</li>
  * </ul>
+ * Ctrl-clicking the button doesn't transfer straight away. The workbench screen first asks how many crafts to
+ * order ingredients for, because JEI's transfer has no amount of its own, only Shift for "max".
+ * <p>
  * JEI calls this every frame to draw the button, so the network stock is indexed by item once per stock
  * update rather than scanned for each check.
  */
@@ -119,7 +123,12 @@ public class WorkbenchRecipeTransferHandler
                     Component.translatable("refinedcreation.workbench.jei.missing"), missing);
         }
         if (doTransfer) {
-            PacketDistributor.sendToServer(new TransferPayload(menu.containerId, options, maxTransfer));
+            if (Screen.hasControlDown()) {
+                // The screen picks this up once JEI closes, and sends it with the chosen number of crafts.
+                menu.setPendingTransfer(options, recipe.value().getResultItem(player.level().registryAccess()));
+            } else {
+                PacketDistributor.sendToServer(new TransferPayload(menu.containerId, options, maxTransfer, 1));
+            }
         }
         return networkOnly.isEmpty() ? null : new NetworkOrderNotice(networkOnly);
     }
@@ -190,6 +199,8 @@ public class WorkbenchRecipeTransferHandler
         public void getTooltip(ITooltipBuilder tooltip) {
             tooltip.add(Component.translatable("refinedcreation.workbench.jei.order"));
             tooltip.add(Component.translatable("refinedcreation.workbench.jei.order.detail")
+                    .withStyle(ChatFormatting.GRAY));
+            tooltip.add(Component.translatable("refinedcreation.workbench.jei.order.amount")
                     .withStyle(ChatFormatting.GRAY));
         }
 

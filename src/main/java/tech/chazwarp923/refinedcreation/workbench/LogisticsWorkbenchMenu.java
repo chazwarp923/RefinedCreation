@@ -93,6 +93,9 @@ public class LogisticsWorkbenchMenu extends AbstractContainerMenu {
     @Nullable
     private Component status;
     private long statusTime;
+    /** A JEI transfer waiting for the player to choose how many crafts to order. Client only. */
+    @Nullable
+    private PendingTransfer pendingTransfer;
 
     private long lastStockSync = Long.MIN_VALUE / 2;
     /** What the client was last sent, to skip periodic syncs that would change nothing. Server only. */
@@ -343,7 +346,7 @@ public class LogisticsWorkbenchMenu extends AbstractContainerMenu {
 
     void handleRequest(ItemStack item, int count) {
         if (workbench != null) {
-            sendStatus(workbench.requestItem(item, count));
+            sendStatus(workbench.requestItem(item, Math.min(count, LogisticsWorkbenchBlockEntity.MAX_REQUEST)));
         }
     }
 
@@ -352,16 +355,18 @@ public class LogisticsWorkbenchMenu extends AbstractContainerMenu {
             return;
         }
         Component message = switch (action) {
-            case ORDER_PATTERN -> workbench.orderPattern(Math.max(1, Math.min(amount, 64)));
+            case ORDER_PATTERN -> workbench.orderPattern(
+                    Math.max(1, Math.min(amount, LogisticsWorkbenchBlockEntity.MAX_CRAFTS)));
             case CLEAR_GRID -> workbench.clearGrid(player);
             case SEND_RETURNS -> workbench.sendReturns();
         };
         sendStatus(message);
     }
 
-    void handleTransfer(List<List<ItemStack>> options, boolean max) {
+    void handleTransfer(List<List<ItemStack>> options, boolean max, int crafts) {
         if (workbench != null) {
-            sendStatus(workbench.transferRecipe(player, options, max));
+            sendStatus(workbench.transferRecipe(player, options, max,
+                    Math.max(1, Math.min(crafts, LogisticsWorkbenchBlockEntity.MAX_CRAFTS))));
         }
     }
 
@@ -394,6 +399,32 @@ public class LogisticsWorkbenchMenu extends AbstractContainerMenu {
     public void receiveStatus(Component status) {
         this.status = status;
         this.statusTime = System.currentTimeMillis();
+    }
+
+    /**
+     * Holds a JEI recipe transfer until the screen has asked how many crafts to order ingredients for.
+     */
+    public void setPendingTransfer(List<List<ItemStack>> options, ItemStack result) {
+        pendingTransfer = new PendingTransfer(options, result.copy());
+    }
+
+    /**
+     * @return the transfer waiting for a craft count, or {@code null}; either way, none is waiting afterwards
+     */
+    @Nullable
+    public PendingTransfer takePendingTransfer() {
+        PendingTransfer transfer = pendingTransfer;
+        pendingTransfer = null;
+        return transfer;
+    }
+
+    /**
+     * A JEI recipe transfer held until the player chooses how many crafts to order for.
+     *
+     * @param options the acceptable items for each grid slot, as sent in a transfer
+     * @param result  what the recipe makes, shown while asking
+     */
+    public record PendingTransfer(List<List<ItemStack>> options, ItemStack result) {
     }
 
     public List<BigItemStack> getStock() {

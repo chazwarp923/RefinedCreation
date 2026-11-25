@@ -3,6 +3,7 @@ package tech.chazwarp923.refinedcreation.workbench.client;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.function.IntConsumer;
 
 import javax.annotation.Nullable;
 
@@ -31,17 +32,20 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.item.ItemStack;
 import net.neoforged.fml.ModList;
 import net.neoforged.neoforge.network.PacketDistributor;
 import tech.chazwarp923.refinedcreation.ClientConfig;
 import tech.chazwarp923.refinedcreation.compat.jei.JeiSearchSync;
 import tech.chazwarp923.refinedcreation.workbench.LogisticsWorkbenchBlockEntity;
 import tech.chazwarp923.refinedcreation.workbench.LogisticsWorkbenchMenu;
+import tech.chazwarp923.refinedcreation.workbench.LogisticsWorkbenchMenu.PendingTransfer;
 import tech.chazwarp923.refinedcreation.workbench.StockView;
 import tech.chazwarp923.refinedcreation.workbench.WorkbenchPackets;
 import tech.chazwarp923.refinedcreation.workbench.WorkbenchPackets.ActionPayload;
 import tech.chazwarp923.refinedcreation.workbench.WorkbenchPackets.AddressPayload;
 import tech.chazwarp923.refinedcreation.workbench.WorkbenchPackets.RequestPayload;
+import tech.chazwarp923.refinedcreation.workbench.WorkbenchPackets.TransferPayload;
 
 /**
  * The Logistics Workbench GUI, styled after Create's Stock Keeper. It draws Create's own textures, which are
@@ -154,10 +158,10 @@ public class LogisticsWorkbenchScreen extends AbstractContainerScreen<LogisticsW
     private static final boolean JEI_LOADED = ModList.get().isLoaded("jei");
 
     // Create's palette.
-    private static final int COLOR_TITLE = 0x714A40;
-    private static final int COLOR_SEARCH = 0x4A2D31;
-    private static final int COLOR_CREAM = 0xF8F8EC;
-    private static final int COLOR_HINT = 0xCDBCA8;
+    static final int COLOR_TITLE = 0x714A40;
+    static final int COLOR_SEARCH = 0x4A2D31;
+    static final int COLOR_CREAM = 0xF8F8EC;
+    static final int COLOR_HINT = 0xCDBCA8;
     private static final int COLOR_INVENTORY_LABEL = 0x404040;
     private static final int ARGB_BLACK = 0xFF000000;
     private static final int ARGB_STONE = 0xFF8D8F8D;
@@ -185,6 +189,9 @@ public class LogisticsWorkbenchScreen extends AbstractContainerScreen<LogisticsW
     /** JEI's search text when it was last copied into ours. */
     private String seenJeiSearch = "";
     private int scrollRow;
+    /** The amount popup, while it's open. It takes all input. */
+    @Nullable
+    private AmountPopup popup;
 
     public LogisticsWorkbenchScreen(LogisticsWorkbenchMenu menu, Inventory inventory, Component title) {
         super(menu, inventory, title);
@@ -251,6 +258,8 @@ public class LogisticsWorkbenchScreen extends AbstractContainerScreen<LogisticsW
         orderButton.setToolTip(Component.translatable("refinedcreation.workbench.order"));
         orderButton.getToolTip().add(Component.translatable("refinedcreation.workbench.order.tooltip")
                 .withStyle(ChatFormatting.GRAY));
+        orderButton.getToolTip().add(Component.translatable("refinedcreation.workbench.order.tooltip.amount")
+                .withStyle(ChatFormatting.GRAY));
         addRenderableWidget(orderButton);
 
         clearButton = new WoodButton(leftPos + BUTTONS_X, topPos + CLEAR_Y, WoodButton.BIN);
@@ -291,6 +300,46 @@ public class LogisticsWorkbenchScreen extends AbstractContainerScreen<LogisticsW
         PacketDistributor.sendToServer(new ActionPayload(menu.containerId, action, amount));
     }
 
+    // --- Amount popup ----------------------------------------------------------------------------------------
+
+    private void openPopup(Component title, Component subtitle, ItemStack icon, int initial, int max,
+                           IntConsumer onConfirm) {
+        int centreX = leftPos + WINDOW_WIDTH / 2;
+        // Over the stock list, but always fully on screen, even when the window is taller than the screen.
+        int halfHeight = AmountPopup.HEIGHT / 2;
+        int centreY = Math.max(halfHeight + 4,
+                Math.min(height - halfHeight - 4, stockTop() + stockRows * ROW_HEIGHT / 2));
+        popup = new AmountPopup(font, centreX, centreY, title, subtitle, icon, initial, max, onConfirm);
+    }
+
+    /**
+     * Asks how many of a stock item to order.
+     */
+    private void openRequestPopup(BigItemStack entry) {
+        boolean craftable = entry.count >= BigItemStack.INF;
+        int max = craftable ? LogisticsWorkbenchBlockEntity.MAX_REQUEST
+                : Math.min(entry.count, LogisticsWorkbenchBlockEntity.MAX_REQUEST);
+        ItemStack item = entry.stack.copyWithCount(1);
+        openPopup(item.getHoverName(), availableText(entry), item, item.getMaxStackSize(), max,
+                count -> PacketDistributor.sendToServer(new RequestPayload(menu.containerId, item, count)));
+    }
+
+    /**
+     * Asks how many crafts to order ingredients for, then runs {@code onConfirm} with the answer.
+     */
+    private void openCraftsPopup(ItemStack result, IntConsumer onConfirm) {
+        openPopup(Component.translatable("refinedcreation.workbench.amount.title_crafts"),
+                Component.translatable("refinedcreation.workbench.amount.crafts"), result, 1,
+                LogisticsWorkbenchBlockEntity.MAX_CRAFTS, onConfirm);
+    }
+
+    private static Component availableText(BigItemStack entry) {
+        return Component.translatable("refinedcreation.workbench.available",
+                entry.count >= BigItemStack.INF
+                        ? Component.translatable("refinedcreation.workbench.craftable")
+                        : Component.literal(Integer.toString(entry.count)));
+    }
+
     // --- Stock list ------------------------------------------------------------------------------------------
 
     @Override
@@ -298,6 +347,14 @@ public class LogisticsWorkbenchScreen extends AbstractContainerScreen<LogisticsW
         super.containerTick();
         deliveryAddress.tick();
         returnAddress.tick();
+        // A Ctrl-click on JEI's "+": ask for the number of crafts now that JEI has closed.
+        if (popup == null) {
+            PendingTransfer transfer = menu.takePendingTransfer();
+            if (transfer != null) {
+                openCraftsPopup(transfer.result(), crafts -> PacketDistributor.sendToServer(
+                        new TransferPayload(menu.containerId, transfer.options(), false, crafts)));
+            }
+        }
         if (JEI_LOADED && JeiSearchSync.isTyping() && !seenJeiSearch.equals(JeiSearchSync.getFilterText())) {
             pullSearchFromJei();
         }
@@ -431,6 +488,11 @@ public class LogisticsWorkbenchScreen extends AbstractContainerScreen<LogisticsW
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        if (popup != null) {
+            popup.mouseClicked(mouseX, mouseY, button);
+            closePopupIfDone();
+            return true;
+        }
         // Clicking anywhere else releases a text field, so inventory keys work again.
         for (EditBox box : new EditBox[] {search, deliveryAddress, returnAddress}) {
             if (box.isFocused() && !box.isMouseOver(mouseX, mouseY)) {
@@ -455,6 +517,12 @@ public class LogisticsWorkbenchScreen extends AbstractContainerScreen<LogisticsW
             playClick();
             return true;
         }
+        if (button == GLFW.GLFW_MOUSE_BUTTON_RIGHT && orderButton.isMouseOver(mouseX, mouseY)) {
+            openCraftsPopup(menu.getSlot(LogisticsWorkbenchMenu.RESULT_SLOT).getItem().copyWithCount(1),
+                    crafts -> sendAction(WorkbenchPackets.Action.ORDER_PATTERN, crafts));
+            playClick();
+            return true;
+        }
         if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT && isOverSyncButton(mouseX, mouseY)) {
             SearchSyncMode.cycleConfig();
             pushSearchToJei();
@@ -462,6 +530,12 @@ public class LogisticsWorkbenchScreen extends AbstractContainerScreen<LogisticsW
             return true;
         }
         BigItemStack entry = stockAt(mouseX, mouseY);
+        if (entry != null && (button == GLFW.GLFW_MOUSE_BUTTON_MIDDLE
+                || (button == GLFW.GLFW_MOUSE_BUTTON_LEFT && hasControlDown()))) {
+            openRequestPopup(entry);
+            playClick();
+            return true;
+        }
         if (entry != null && (button == GLFW.GLFW_MOUSE_BUTTON_LEFT || button == GLFW.GLFW_MOUSE_BUTTON_RIGHT)) {
             int count = hasShiftDown() ? entry.stack.getMaxStackSize() : 1;
             if (button == GLFW.GLFW_MOUSE_BUTTON_RIGHT) {
@@ -475,6 +549,10 @@ public class LogisticsWorkbenchScreen extends AbstractContainerScreen<LogisticsW
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+        if (popup != null) {
+            popup.mouseScrolled(mouseX, mouseY, scrollY);
+            return true;
+        }
         int x = (int) mouseX - leftPos;
         int y = (int) mouseY - stockTop();
         if (x >= FRAME_LEFT && x < FRAME_RIGHT && y >= 0 && y < stockRows * ROW_HEIGHT) {
@@ -486,12 +564,43 @@ public class LogisticsWorkbenchScreen extends AbstractContainerScreen<LogisticsW
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (popup != null) {
+            popup.keyPressed(keyCode, scanCode, modifiers);
+            closePopupIfDone();
+            return true;
+        }
         // While typing, keep keys like E (inventory) and number keys (hotbar swaps) out of the container.
         if (getFocused() instanceof EditBox box && box.isFocused() && keyCode != GLFW.GLFW_KEY_ESCAPE) {
             box.keyPressed(keyCode, scanCode, modifiers);
             return true;
         }
         return super.keyPressed(keyCode, scanCode, modifiers);
+    }
+
+    @Override
+    public boolean charTyped(char codePoint, int modifiers) {
+        if (popup != null) {
+            popup.charTyped(codePoint, modifiers);
+            return true;
+        }
+        return super.charTyped(codePoint, modifiers);
+    }
+
+    @Override
+    public boolean mouseReleased(double mouseX, double mouseY, int button) {
+        // Keep clicks and drags from reaching the slots under the popup.
+        return popup != null || super.mouseReleased(mouseX, mouseY, button);
+    }
+
+    @Override
+    public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
+        return popup != null || super.mouseDragged(mouseX, mouseY, button, dragX, dragY);
+    }
+
+    private void closePopupIfDone() {
+        if (popup != null && popup.isClosed()) {
+            popup = null;
+        }
     }
 
     /**
@@ -524,6 +633,10 @@ public class LogisticsWorkbenchScreen extends AbstractContainerScreen<LogisticsW
         super.render(graphics, mouseX, mouseY, partialTick);
         renderStock(graphics, mouseX, mouseY);
         renderStatus(graphics);
+        if (popup != null) {
+            popup.render(graphics, mouseX, mouseY, partialTick);
+            return;
+        }
         renderTooltip(graphics, mouseX, mouseY);
         renderStockTooltip(graphics, mouseX, mouseY);
         renderWidgetTooltips(graphics, mouseX, mouseY);
@@ -645,15 +758,7 @@ public class LogisticsWorkbenchScreen extends AbstractContainerScreen<LogisticsW
     private void renderBufferPanel(GuiGraphics graphics, int x, int y) {
         int left = x + PANEL_X;
         int top = y + PANEL_Y;
-        int right = left + PANEL_WIDTH;
-        int bottom = top + PANEL_HEIGHT;
-        for (int i = 0; i < FRAME_COLORS.length; i++) {
-            graphics.fill(left + i, top + i, right - i, bottom - i, FRAME_COLORS[i]);
-        }
-        graphics.fill(left + BORDER, top + BORDER, right - BORDER, bottom - BORDER, ARGB_WOOD);
-        // The darker inner trim the Stock Keeper's wood has along its sides.
-        graphics.fill(left + BORDER + 1, top + BORDER, left + BORDER + 2, bottom - BORDER, ARGB_WOOD_DARK);
-        graphics.fill(right - BORDER - 2, top + BORDER, right - BORDER - 1, bottom - BORDER, ARGB_WOOD_DARK);
+        renderPanel(graphics, left, top, left + PANEL_WIDTH, top + PANEL_HEIGHT);
 
         int rows = LogisticsWorkbenchBlockEntity.BUFFER_SLOTS / LogisticsWorkbenchMenu.BUFFER_COLS;
         for (int row = 0; row < rows; row++) {
@@ -679,9 +784,22 @@ public class LogisticsWorkbenchScreen extends AbstractContainerScreen<LogisticsW
     }
 
     /**
+     * A small window in the main window's stone frame, with the Stock Keeper's wood inside.
+     */
+    static void renderPanel(GuiGraphics graphics, int left, int top, int right, int bottom) {
+        for (int i = 0; i < FRAME_COLORS.length; i++) {
+            graphics.fill(left + i, top + i, right - i, bottom - i, FRAME_COLORS[i]);
+        }
+        graphics.fill(left + BORDER, top + BORDER, right - BORDER, bottom - BORDER, ARGB_WOOD);
+        // The darker inner trim the Stock Keeper's wood has along its sides.
+        graphics.fill(left + BORDER + 1, top + BORDER, left + BORDER + 2, bottom - BORDER, ARGB_WOOD_DARK);
+        graphics.fill(right - BORDER - 2, top + BORDER, right - BORDER - 1, bottom - BORDER, ARGB_WOOD_DARK);
+    }
+
+    /**
      * A cream address tag like the Stock Keeper's, sized to fit.
      */
-    private static void tag(GuiGraphics graphics, int x, int y, int width, int height) {
+    static void tag(GuiGraphics graphics, int x, int y, int width, int height) {
         graphics.fill(x, y, x + width, y + height, ARGB_BLACK);
         graphics.fill(x + 1, y + 1, x + width - 1, y + height - 1, ARGB_CREAM);
         graphics.fill(x + 1, y + 1, x + width - 1, y + 2, ARGB_CREAM_SHADE);
@@ -810,11 +928,10 @@ public class LogisticsWorkbenchScreen extends AbstractContainerScreen<LogisticsW
             return;
         }
         List<Component> lines = new ArrayList<>(getTooltipFromContainerItem(entry.stack));
-        lines.add(Component.translatable("refinedcreation.workbench.available",
-                entry.count >= BigItemStack.INF
-                        ? Component.translatable("refinedcreation.workbench.craftable")
-                        : Component.literal(Integer.toString(entry.count))).withStyle(ChatFormatting.GOLD));
+        lines.add(availableText(entry).copy().withStyle(ChatFormatting.GOLD));
         lines.add(Component.translatable("refinedcreation.workbench.stock.tooltip").withStyle(ChatFormatting.GRAY));
+        lines.add(Component.translatable("refinedcreation.workbench.stock.tooltip.amount")
+                .withStyle(ChatFormatting.GRAY));
         graphics.renderComponentTooltip(font, lines, mouseX, mouseY);
     }
 

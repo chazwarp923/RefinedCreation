@@ -60,6 +60,10 @@ public class LogisticsWorkbenchBlockEntity extends BlockEntity implements MenuPr
     public static final int BUFFER_SLOTS = 18;
     public static final int RETURN_SLOTS = 9;
     public static final int MAX_ADDRESS_LENGTH = 64;
+    /** The most crafts one order can be for. */
+    public static final int MAX_CRAFTS = 999;
+    /** The most of one item a single request can ask for. */
+    public static final int MAX_REQUEST = 10_000;
 
     @Nullable
     private UUID frequency;
@@ -269,6 +273,15 @@ public class LogisticsWorkbenchBlockEntity extends BlockEntity implements MenuPr
      * @param options the acceptable items for each grid slot, in grid order; an empty list leaves the slot empty
      */
     public Component transferRecipe(Player player, List<List<ItemStack>> options, boolean max) {
+        return transferRecipe(player, options, max, 1);
+    }
+
+    /**
+     * As {@link #transferRecipe(Player, List, boolean)}, then, for more than one craft, orders what the buffer
+     * and grid are missing for {@code crafts} crafts of the new pattern instead of one craft's network-only
+     * slots.
+     */
+    public Component transferRecipe(Player player, List<List<ItemStack>> options, boolean max, int crafts) {
         InventorySummary stock = getNetworkStock(true);
         List<BigItemStack> toOrder = new ArrayList<>();
         MutableComponent unavailable = null;
@@ -314,6 +327,10 @@ public class LogisticsWorkbenchBlockEntity extends BlockEntity implements MenuPr
 
         if (unavailable != null) {
             return error(Component.translatable("refinedcreation.workbench.status.missing", unavailable));
+        }
+        if (crafts > 1) {
+            // The pattern now holds the network-only slots too, so order from it as it is.
+            return orderRememberedPattern(crafts);
         }
         if (toOrder.isEmpty()) {
             return Component.empty();
@@ -443,6 +460,13 @@ public class LogisticsWorkbenchBlockEntity extends BlockEntity implements MenuPr
             return Component.empty();
         }
         rememberPattern();
+        return orderRememberedPattern(crafts);
+    }
+
+    /**
+     * Orders what the buffer and grid are missing for {@code crafts} crafts of the remembered pattern.
+     */
+    private Component orderRememberedPattern(int crafts) {
         List<BigItemStack> perCraft = new ArrayList<>();
         for (ItemStack stack : pattern) {
             if (!stack.isEmpty()) {

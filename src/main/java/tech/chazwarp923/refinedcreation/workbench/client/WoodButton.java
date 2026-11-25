@@ -63,6 +63,42 @@ public class WoodButton extends IconButton {
             "....GG...",
             "....G....");
 
+    /** A minus: fewer. */
+    public static final ScreenElement MINUS = glyph(
+            ".........",
+            ".........",
+            ".........",
+            "GGGGGGGGG",
+            "GIIIIIIIG",
+            "GGGGGGGGG",
+            ".........",
+            ".........",
+            ".........");
+
+    /** A tick: confirm. */
+    public static final ScreenElement CHECK = glyph(
+            ".......GG",
+            "......GIG",
+            ".....GIG.",
+            "GG..GIG..",
+            "GIGGIG...",
+            ".GIIG....",
+            "..GG.....",
+            ".........",
+            ".........");
+
+    /** A cross: cancel. */
+    public static final ScreenElement CROSS = glyph(
+            "GG.....GG",
+            "GIG...GIG",
+            ".GIG.GIG.",
+            "..GIGIG..",
+            "...GIG...",
+            "..GIGIG..",
+            ".GIG.GIG.",
+            "GIG...GIG",
+            "GG.....GG");
+
     public WoodButton(int x, int y, ScreenElement glyph) {
         super(x, y, SIZE, SIZE, glyph);
     }

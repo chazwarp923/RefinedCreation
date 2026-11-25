@@ -14,6 +14,8 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.contents.TranslatableContents;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.item.Item;
@@ -203,6 +205,108 @@ public class LogisticsWorkbenchTests {
         helper.assertTrue(top == 5 && bottom == 5, "Max transfer should split 5/5, got " + top + "/" + bottom);
         helper.assertTrue(player.getInventory().countItem(Items.OAK_PLANKS) == 0, "All planks should be used");
         helper.succeed();
+    }
+
+    /**
+     * An exact amount from the amount popup is ordered as asked, and an amount larger than the stock orders
+     * what there is.
+     */
+    @GameTest(template = "empty_6x3x3", timeoutTicks = 200)
+    public static void requestOrdersExactAmountUpToStock(GameTestHelper helper) {
+        ChestBlockEntity chest = chestNetwork(helper, new ItemStack(Items.IRON_INGOT, 40));
+
+        helper.startSequence()
+                .thenWaitUntil(() -> helper.assertTrue(
+                        packagerAt(helper, CHEST_PACKAGER).targetInventory.hasInventory(),
+                        "Chest packager has not found the chest"))
+                .thenExecute(() -> {
+                    tuneToChest(helper);
+                    workbench(helper).requestItem(new ItemStack(Items.IRON_INGOT), 25);
+                    helper.assertTrue(chest.getItem(0).getCount() == 15,
+                            "Network should have packaged 25 iron, chest holds " + chest.getItem(0).getCount());
+                    helper.assertTrue(packaged(packagerAt(helper, CHEST_PACKAGER), Items.IRON_INGOT) == 25,
+                            "Packages should hold 25 iron");
+                })
+                // A new tick, so the network's stock summary sees what's left.
+                .thenIdle(2)
+                .thenExecute(() -> {
+                    workbench(helper).requestItem(new ItemStack(Items.IRON_INGOT), 100);
+                    helper.assertTrue(chest.getItem(0).isEmpty(),
+                            "Asking for more than the stock should order all of it, chest holds "
+                                    + chest.getItem(0).getCount());
+                    helper.assertTrue(packaged(packagerAt(helper, CHEST_PACKAGER), Items.IRON_INGOT) == 40,
+                            "Packages should hold all 40 iron");
+                })
+                .thenSucceed();
+    }
+
+    /**
+     * A recipe transfer for several crafts places the recipe, keeps network-only slots in the pattern, and
+     * orders those ingredients for every craft.
+     */
+    @GameTest(template = "empty_6x3x3", timeoutTicks = 200)
+    public static void recipeTransferForSeveralCraftsOrdersEachCraft(GameTestHelper helper) {
+        ChestBlockEntity chest = chestNetwork(helper, new ItemStack(Items.OAK_PLANKS, 32));
+        Player player = helper.makeMockPlayer(GameType.SURVIVAL);
+
+        // Sticks: planks in slots 0 and 3, none of them on hand.
+        List<List<ItemStack>> options = new ArrayList<>();
+        for (int i = 0; i < 9; i++) {
+            options.add(i == 0 || i == 3 ? List.of(new ItemStack(Items.OAK_PLANKS)) : List.of());
+        }
+
+        helper.startSequence()
+                .thenWaitUntil(() -> helper.assertTrue(
+                        packagerAt(helper, CHEST_PACKAGER).targetInventory.hasInventory(),
+                        "Chest packager has not found the chest"))
+                .thenExecute(() -> {
+                    tuneToChest(helper);
+                    LogisticsWorkbenchBlockEntity workbench = workbench(helper);
+                    Component status = workbench.transferRecipe(player, options, false, 8);
+
+                    helper.assertTrue(status.getContents() instanceof TranslatableContents contents
+                                    && contents.getKey().equals("refinedcreation.workbench.status.ordered_crafts"),
+                            "Unexpected status: " + status.getString());
+                    helper.assertTrue(workbench.getPattern().get(0).is(Items.OAK_PLANKS)
+                                    && workbench.getPattern().get(3).is(Items.OAK_PLANKS),
+                            "The pattern should keep both network-only plank slots");
+                    helper.assertTrue(chest.getItem(0).getCount() == 16,
+                            "8 crafts of 2 planks should order 16, chest holds " + chest.getItem(0).getCount());
+                    helper.assertTrue(packaged(packagerAt(helper, CHEST_PACKAGER), Items.OAK_PLANKS) == 16,
+                            "Packages should hold 16 planks");
+                })
+                .thenSucceed();
+    }
+
+    /**
+     * A chest on a Create network through a Packager and Stock Link, plus an untuned workbench.
+     */
+    private static ChestBlockEntity chestNetwork(GameTestHelper helper, ItemStack contents) {
+        helper.setBlock(CHEST, Blocks.CHEST);
+        helper.setBlock(CHEST_PACKAGER, packagerFacingEast());
+        helper.setBlock(CHEST_LINK, AllBlocks.STOCK_LINK.getDefaultState()
+                .setValue(FaceAttachedHorizontalDirectionalBlock.FACE, AttachFace.FLOOR));
+        helper.setBlock(WORKBENCH, ModBlocks.LOGISTICS_WORKBENCH.get());
+        ChestBlockEntity chest = helper.getBlockEntity(CHEST);
+        chest.setItem(0, contents);
+        return chest;
+    }
+
+    private static void tuneToChest(GameTestHelper helper) {
+        PackagerLinkBlockEntity link = helper.getBlockEntity(CHEST_LINK);
+        workbench(helper).setFrequency(link.behaviour.freqId);
+        workbench(helper).setDeliveryAddress("Workbench");
+    }
+
+    /**
+     * @return how many of {@code item} the Packager's outgoing packages hold
+     */
+    private static int packaged(PackagerBlockEntity packager, Item item) {
+        int total = 0;
+        for (ItemStack box : outgoing(packager)) {
+            total += count(PackageItem.getContents(box), item);
+        }
+        return total;
     }
 
     private static net.minecraft.world.level.block.state.BlockState packagerFacingEast() {
