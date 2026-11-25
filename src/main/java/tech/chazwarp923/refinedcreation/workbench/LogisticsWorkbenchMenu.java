@@ -309,6 +309,20 @@ public class LogisticsWorkbenchMenu extends AbstractContainerMenu {
         if (!force && tuned == lastSentTuned && isSameStock(summary, lastSentStock)) {
             return;
         }
+        StockSnapshot snapshot = snapshotStock(summary);
+        lastSentStock = snapshot.summary();
+        lastSentTuned = tuned;
+        PacketDistributor.sendToPlayer(serverPlayer, new StockPayload(containerId, tuned, snapshot.stacks()));
+    }
+
+    /**
+     * What a stock sync sends: the stack list for the packet, and a copy of the summary to compare the next sync
+     * against. Both are copies, because Create can change a cached summary after returning it.
+     */
+    public record StockSnapshot(List<BigItemStack> stacks, InventorySummary summary) {
+    }
+
+    public static StockSnapshot snapshotStock(InventorySummary summary) {
         List<BigItemStack> stacks = new ArrayList<>();
         InventorySummary sent = new InventorySummary();
         for (BigItemStack entry : summary.getStacks()) {
@@ -316,9 +330,7 @@ public class LogisticsWorkbenchMenu extends AbstractContainerMenu {
             stacks.add(new BigItemStack(stack, entry.count));
             sent.add(stack, entry.count);
         }
-        lastSentStock = sent;
-        lastSentTuned = tuned;
-        PacketDistributor.sendToPlayer(serverPlayer, new StockPayload(containerId, tuned, stacks));
+        return new StockSnapshot(stacks, sent);
     }
 
     /**

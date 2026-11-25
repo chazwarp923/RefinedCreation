@@ -1,20 +1,12 @@
 package tech.chazwarp923.refinedcreation.gametest;
 
-import java.lang.reflect.Field;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 
 import com.refinedmods.refinedstorage.api.autocrafting.calculation.CancellationToken;
 import com.refinedmods.refinedstorage.api.network.Network;
 import com.refinedmods.refinedstorage.api.network.autocrafting.AutocraftingNetworkComponent;
-import com.refinedmods.refinedstorage.api.resource.ResourceAmount;
 import com.refinedmods.refinedstorage.api.storage.Actor;
-import com.refinedmods.refinedstorage.common.autocrafting.PatternState;
-import com.refinedmods.refinedstorage.common.autocrafting.ProcessingPatternState;
-import com.refinedmods.refinedstorage.common.autocrafting.patterngrid.PatternType;
-import com.refinedmods.refinedstorage.common.content.DataComponents;
-import com.refinedmods.refinedstorage.common.content.Items;
 import com.refinedmods.refinedstorage.common.support.resource.ItemResource;
 import com.simibubi.create.AllBlocks;
 import com.simibubi.create.content.logistics.BigItemStack;
@@ -28,11 +20,9 @@ import com.simibubi.create.content.logistics.stockTicker.PackageOrderWithCrafts;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.Container;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Block;
@@ -42,7 +32,6 @@ import net.minecraft.world.level.block.entity.SignText;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.AttachFace;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
-import net.minecraft.world.level.block.state.properties.Property;
 import net.neoforged.neoforge.capabilities.Capabilities;
 import net.neoforged.neoforge.gametest.GameTestHolder;
 import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
@@ -223,38 +212,15 @@ public class LogisticsDispatcherTests {
 
     private static ItemStack processingPattern(ItemResource input, long inputAmount, ItemResource output,
                                                long outputAmount) {
-        ItemStack pattern = new ItemStack(Items.INSTANCE.getPattern());
-        pattern.set(DataComponents.INSTANCE.getPatternState(),
-                new PatternState(UUID.randomUUID(), PatternType.PROCESSING));
-        pattern.set(DataComponents.INSTANCE.getProcessingPatternState(), new ProcessingPatternState(
-                List.of(Optional.of(new ProcessingPatternState.ProcessingIngredient(
-                        new ResourceAmount(input, inputAmount), List.of()))),
-                List.of(Optional.of(new ResourceAmount(output, outputAmount)))));
-        return pattern;
+        return RsTestSupport.processingPattern(input, inputAmount, output, outputAmount);
     }
 
-    /**
-     * The Autocrafter's pattern inventory is package-private; reflection keeps the test free of a GUI round trip.
-     */
     private static Container patternContainer(GameTestHelper helper) {
-        Object autocrafter = helper.getBlockEntity(AUTOCRAFTER);
-        try {
-            Field field = autocrafter.getClass().getDeclaredField("patternContainer");
-            field.setAccessible(true);
-            return (Container) field.get(autocrafter);
-        } catch (ReflectiveOperationException e) {
-            throw new IllegalStateException("Cannot reach the Autocrafter pattern inventory", e);
-        }
+        return RsTestSupport.patternContainer(helper.getBlockEntity(AUTOCRAFTER));
     }
 
-    @SuppressWarnings({"unchecked", "rawtypes"})
     private static BlockState withDirection(BlockState state, Direction direction) {
-        for (Property<?> property : state.getProperties()) {
-            if (property.getName().equals("direction") && property.getPossibleValues().contains(direction)) {
-                return state.setValue((Property) property, (Comparable) direction);
-            }
-        }
-        throw new IllegalStateException("No direction property on " + state);
+        return RsTestSupport.withDirection(state, direction);
     }
 
     private static AutocraftingNetworkComponent autocrafting(GameTestHelper helper) {
@@ -265,7 +231,7 @@ public class LogisticsDispatcherTests {
     }
 
     private static Block rsBlock(String path) {
-        return BuiltInRegistries.BLOCK.get(ResourceLocation.fromNamespaceAndPath("refinedstorage", path));
+        return RsTestSupport.rsBlock(path);
     }
 
     private static IItemHandler bridgeHandler(GameTestHelper helper) {

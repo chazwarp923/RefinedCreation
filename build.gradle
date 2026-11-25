@@ -113,6 +113,20 @@ neoForge {
             systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
         }
 
+        // Like gameTestServer, plus the performance benchmarks on a large Refined Storage network. They only
+        // register when refinedcreation.benchmarks is set, so the normal test run stays fast. Results are
+        // written as Markdown tables to build/benchmarks. Run with ./gradlew runBenchmarks.
+        benchmarkServer {
+            type = "gameTestServer"
+            systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+            systemProperty 'refinedcreation.benchmarks', 'true'
+            systemProperty 'refinedcreation.benchmarkOutput', file('build/benchmarks').absolutePath
+            // ./gradlew runBenchmarks -Pprofile also records a Java Flight Recorder profile to build/benchmarks.
+            if (project.hasProperty('profile')) {
+                jvmArgument "-XX:StartFlightRecording=filename=${file('build/benchmarks/benchmarks.jfr').absolutePath},settings=profile"
+            }
+        }
+
         data {
             data()
             // example of overriding the workingDirectory set in configureEach above, uncomment if you want to use it
@@ -239,4 +253,11 @@ idea {
         downloadSources = true
         downloadJavadoc = true
     }
+}
+
+// Runs the gametests plus the large-network performance benchmarks. See the benchmarkServer run above.
+tasks.register('runBenchmarks') {
+    group = 'verification'
+    description = 'Runs the performance benchmarks on a large Refined Storage network.'
+    dependsOn 'runBenchmarkServer'
 }
