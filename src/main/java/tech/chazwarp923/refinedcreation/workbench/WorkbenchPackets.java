@@ -26,7 +26,7 @@ import tech.chazwarp923.refinedcreation.workbench.client.WorkbenchClientPackets;
  * ignores a payload unless that menu is still the open one.
  */
 public final class WorkbenchPackets {
-    private static final String VERSION = "1";
+    private static final String VERSION = "2";
 
     private WorkbenchPackets() {
     }
@@ -52,6 +52,35 @@ public final class WorkbenchPackets {
 
         @Override
         public Type<StockPayload> type() {
+            return TYPE;
+        }
+    }
+
+    /**
+     * Server → client: new counts for the stock the client was last sent, entry by entry. Sent instead of a
+     * {@link StockPayload} when only counts changed, which is most of the time, at a fraction of the size.
+     */
+    public record StockCountsPayload(int containerId, int[] counts) implements CustomPacketPayload {
+        public static final Type<StockCountsPayload> TYPE = new Type<>(id("workbench_stock_counts"));
+        public static final StreamCodec<RegistryFriendlyByteBuf, StockCountsPayload> STREAM_CODEC = StreamCodec.of(
+                (buf, payload) -> {
+                    buf.writeVarInt(payload.containerId());
+                    buf.writeVarInt(payload.counts().length);
+                    for (int count : payload.counts()) {
+                        buf.writeVarInt(count);
+                    }
+                },
+                buf -> {
+                    int containerId = buf.readVarInt();
+                    int[] counts = new int[buf.readVarInt()];
+                    for (int i = 0; i < counts.length; i++) {
+                        counts[i] = buf.readVarInt();
+                    }
+                    return new StockCountsPayload(containerId, counts);
+                });
+
+        @Override
+        public Type<StockCountsPayload> type() {
             return TYPE;
         }
     }
@@ -171,6 +200,8 @@ public final class WorkbenchPackets {
         // is actually handled on the client.
         registrar.playToClient(StockPayload.TYPE, StockPayload.STREAM_CODEC,
                 (payload, context) -> WorkbenchClientPackets.handleStock(payload));
+        registrar.playToClient(StockCountsPayload.TYPE, StockCountsPayload.STREAM_CODEC,
+                (payload, context) -> WorkbenchClientPackets.handleStockCounts(payload));
         registrar.playToClient(StatusPayload.TYPE, StatusPayload.STREAM_CODEC,
                 (payload, context) -> WorkbenchClientPackets.handleStatus(payload));
         registrar.playToServer(StockRequestPayload.TYPE, StockRequestPayload.STREAM_CODEC, (payload, context) ->

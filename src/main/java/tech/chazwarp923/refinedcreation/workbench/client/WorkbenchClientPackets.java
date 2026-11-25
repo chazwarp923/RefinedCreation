@@ -12,6 +12,7 @@ import net.minecraft.world.entity.player.Player;
 import net.neoforged.neoforge.network.PacketDistributor;
 import tech.chazwarp923.refinedcreation.workbench.LogisticsWorkbenchMenu;
 import tech.chazwarp923.refinedcreation.workbench.WorkbenchPackets.StatusPayload;
+import tech.chazwarp923.refinedcreation.workbench.WorkbenchPackets.StockCountsPayload;
 import tech.chazwarp923.refinedcreation.workbench.WorkbenchPackets.StockPayload;
 import tech.chazwarp923.refinedcreation.workbench.WorkbenchPackets.StockRequestPayload;
 
@@ -28,6 +29,8 @@ public final class WorkbenchClientPackets {
     private static GlobalPos lastStockSource;
     private static List<BigItemStack> lastStock = List.of();
     private static boolean lastTuned;
+    /** The menu the server last sent a whole stock list to, which count updates must be for. */
+    private static int lastStockContainer = -1;
 
     private WorkbenchClientPackets() {
     }
@@ -39,7 +42,28 @@ public final class WorkbenchClientPackets {
             lastStockSource = source(menu);
             lastStock = payload.stock();
             lastTuned = payload.tuned();
+            lastStockContainer = payload.containerId();
         }
+    }
+
+    /**
+     * Applies new counts to the stock this menu was last sent. The stacks stay the same objects, which the
+     * screen's stock list recognises cheaply. If the counts don't fit, asks for the whole stock again.
+     */
+    public static void handleStockCounts(StockCountsPayload payload) {
+        LogisticsWorkbenchMenu menu = openMenu(payload.containerId());
+        if (menu == null) {
+            return;
+        }
+        List<BigItemStack> updated = lastStockContainer == payload.containerId()
+                ? LogisticsWorkbenchMenu.applyCounts(menu.getStock(), payload.counts())
+                : null;
+        if (updated == null) {
+            PacketDistributor.sendToServer(new StockRequestPayload(menu.containerId));
+            return;
+        }
+        menu.receiveStock(menu.isTuned(), updated);
+        lastStock = updated;
     }
 
     /**

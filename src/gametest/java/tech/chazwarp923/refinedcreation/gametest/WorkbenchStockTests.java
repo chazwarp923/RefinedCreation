@@ -7,10 +7,13 @@ import java.util.Locale;
 import com.simibubi.create.content.logistics.BigItemStack;
 import com.simibubi.create.content.logistics.packager.InventorySummary;
 
+import io.netty.buffer.Unpooled;
+
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -20,7 +23,9 @@ import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
 import tech.chazwarp923.refinedcreation.ClientConfig.WorkbenchSort;
 import tech.chazwarp923.refinedcreation.RefinedCreation;
 import tech.chazwarp923.refinedcreation.workbench.LogisticsWorkbenchMenu;
+import tech.chazwarp923.refinedcreation.workbench.LogisticsWorkbenchMenu.StockChange;
 import tech.chazwarp923.refinedcreation.workbench.StockView;
+import tech.chazwarp923.refinedcreation.workbench.WorkbenchPackets.StockCountsPayload;
 
 /**
  * The workbench's stock list: searching and sorting a large stock, and skipping stock syncs that change nothing.
@@ -139,6 +144,50 @@ public class WorkbenchStockTests {
                     + " x" + shown.get(i).count + ", a fresh view has " + fresh.get(i).stack + " x"
                     + fresh.get(i).count);
         }
+    }
+
+    /**
+     * A sync where only counts changed sends just the counts, which the client applies to the stacks it has. A
+     * change of items still sends the whole list, and counts that don't fit the client's list are refused.
+     */
+    @GameTest(template = "empty_6x3x3")
+    public static void countChangesSendOnlyCounts(GameTestHelper helper) {
+        LogisticsWorkbenchMenu.StockSnapshot sent = LogisticsWorkbenchMenu.snapshotStock(
+                summary(new ItemStack(Items.DIAMOND), 10, new ItemStack(Items.IRON_INGOT), 5));
+        helper.assertTrue(LogisticsWorkbenchMenu.compareStock(
+                        summary(new ItemStack(Items.DIAMOND), 10, new ItemStack(Items.IRON_INGOT), 5), sent)
+                == StockChange.SAME, "Nothing changed");
+        helper.assertTrue(LogisticsWorkbenchMenu.compareStock(
+                        summary(new ItemStack(Items.DIAMOND), 10, new ItemStack(Items.GOLD_INGOT), 5), sent)
+                == StockChange.ITEMS, "An item was swapped");
+        helper.assertTrue(LogisticsWorkbenchMenu.compareStock(
+                        summary(new ItemStack(Items.DIAMOND), 10, ItemStack.EMPTY, 0), sent)
+                == StockChange.ITEMS, "An item ran out");
+
+        InventorySummary changed = summary(new ItemStack(Items.DIAMOND), 12, new ItemStack(Items.IRON_INGOT), 5);
+        helper.assertTrue(LogisticsWorkbenchMenu.compareStock(changed, sent) == StockChange.COUNTS,
+                "Only a count changed");
+        LogisticsWorkbenchMenu.StockSnapshot next = sent.withCounts(changed);
+        helper.assertTrue(LogisticsWorkbenchMenu.compareStock(changed, next) == StockChange.SAME,
+                "The updated snapshot should match the stock it was updated to");
+
+        // The counts survive the packet, and the client's list keeps its stack objects.
+        RegistryFriendlyByteBuf buf = new RegistryFriendlyByteBuf(Unpooled.buffer(),
+                helper.getLevel().registryAccess());
+        StockCountsPayload.STREAM_CODEC.encode(buf, new StockCountsPayload(3, next.counts()));
+        StockCountsPayload received = StockCountsPayload.STREAM_CODEC.decode(buf);
+        buf.release();
+        List<BigItemStack> client = LogisticsWorkbenchMenu.applyCounts(sent.stacks(), received.counts());
+        helper.assertTrue(received.containerId() == 3 && client != null && client.size() == 2,
+                "Counts did not apply");
+        for (int i = 0; i < client.size(); i++) {
+            helper.assertTrue(client.get(i).stack == sent.stacks().get(i).stack, "Entry " + i + " got a new stack");
+            int expected = client.get(i).stack.is(Items.DIAMOND) ? 12 : 5;
+            helper.assertTrue(client.get(i).count == expected, "Entry " + i + " has count " + client.get(i).count);
+        }
+        helper.assertTrue(LogisticsWorkbenchMenu.applyCounts(sent.stacks(), new int[] {1, 2, 3}) == null,
+                "Counts for a different list must be refused");
+        helper.succeed();
     }
 
     private static InventorySummary summary(ItemStack first, int firstCount, ItemStack second, int secondCount) {

@@ -88,7 +88,9 @@ public final class StockView {
             BigItemStack stack = stock.get(i);
             int match = -1;
             for (int j = next; j < Math.min(source.size(), next + LOOKAHEAD); j++) {
-                if (ItemStack.isSameItemSameComponents(stack.stack, source.get(j).stack)) {
+                ItemStack previous = source.get(j).stack;
+                // Count updates keep the stack objects, so most entries match without comparing components.
+                if (stack.stack == previous || ItemStack.isSameItemSameComponents(stack.stack, previous)) {
                     match = j;
                     break;
                 }

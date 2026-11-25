@@ -3,6 +3,9 @@ package tech.chazwarp923.refinedcreation.gametest.bench;
 import java.util.ArrayList;
 import java.util.List;
 
+import com.refinedmods.refinedstorage.api.core.Action;
+import com.refinedmods.refinedstorage.api.storage.Actor;
+import com.refinedmods.refinedstorage.common.support.resource.ItemResource;
 import com.simibubi.create.content.logistics.BigItemStack;
 import com.simibubi.create.content.logistics.packager.InventorySummary;
 import com.simibubi.create.content.logistics.packagerLink.LogisticsManager;
@@ -21,6 +24,7 @@ import tech.chazwarp923.refinedcreation.ClientConfig.WorkbenchSort;
 import tech.chazwarp923.refinedcreation.workbench.LogisticsWorkbenchBlockEntity;
 import tech.chazwarp923.refinedcreation.workbench.LogisticsWorkbenchMenu;
 import tech.chazwarp923.refinedcreation.workbench.StockView;
+import tech.chazwarp923.refinedcreation.workbench.WorkbenchPackets.StockCountsPayload;
 import tech.chazwarp923.refinedcreation.workbench.WorkbenchPackets.StockPayload;
 
 /**
@@ -67,6 +71,38 @@ final class WorkbenchBenchmarks {
                     buf.release();
                 });
         bench.note("Workbench stock packet size", String.format("%,d bytes", bytes[0]));
+
+        // W2c: most syncs only change counts, and then only the counts are sent.
+        // One in ten item types gains an item on the network, as the network would rebuild it.
+        List<ItemResource> topped = new ArrayList<>();
+        for (int i = 0; i < summary.getStacks().size(); i += 10) {
+            BigItemStack entry = summary.getStacks().get(i);
+            if (entry.count < BigItemStack.INF) {
+                topped.add(ItemResource.ofItemStack(entry.stack));
+            }
+        }
+        topped.forEach(resource -> net.storage().insert(resource, 1, Action.EXECUTE, Actor.EMPTY));
+        net.nextTick();
+        LogisticsManager.SUMMARIES.invalidateAll();
+        InventorySummary recounted = workbench.getNetworkStock(false);
+        topped.forEach(resource -> net.storage().extract(resource, 1, Action.EXECUTE, Actor.EMPTY));
+        net.nextTick();
+        LogisticsManager.SUMMARIES.invalidateAll();
+        LogisticsWorkbenchMenu.StockChange[] change = new LogisticsWorkbenchMenu.StockChange[1];
+        int[][] counts = new int[1][];
+        bench.measure("W2c", "Stock sync send, counts only: compare + encode", 5, 50, null,
+                () -> {
+                    change[0] = LogisticsWorkbenchMenu.compareStock(recounted, sent);
+                    counts[0] = sent.withCounts(recounted).counts();
+                    RegistryFriendlyByteBuf buf = new RegistryFriendlyByteBuf(Unpooled.buffer(),
+                            net.level().registryAccess());
+                    StockCountsPayload.STREAM_CODEC.encode(buf, new StockCountsPayload(0, counts[0]));
+                    bytes[0] = buf.writerIndex();
+                    buf.release();
+                });
+        helper.assertTrue(change[0] == LogisticsWorkbenchMenu.StockChange.COUNTS,
+                "A counts-only change was classed as " + change[0]);
+        bench.note("Workbench counts packet size", String.format("%,d bytes", bytes[0]));
 
         RegistryFriendlyByteBuf encoded = new RegistryFriendlyByteBuf(Unpooled.buffer(), net.level().registryAccess());
         StockPayload.STREAM_CODEC.encode(encoded, new StockPayload(0, true, sent.stacks()));
@@ -142,6 +178,22 @@ final class WorkbenchBenchmarks {
         helper.assertTrue(shown[0].equals(fresh), "An updated stock list differs from a fresh one");
         bench.measure("W6a1", "Client stock list: first stock after opening (names + sort)", 5, 30, null,
                 () -> shown[0] = new StockView().view(stock, "", WorkbenchSort.NAME, false));
+        // A counts update: the client applies the counts to the stacks it has, then the list updates.
+        StockView countsView = new StockView();
+        countsView.view(stock, "", WorkbenchSort.QUANTITY, true);
+        int[][] applied = new int[1][];
+        int[] round = new int[1];
+        bench.measure("W6a2", "Client stock list: counts update (apply + sort by count)", 5, 30,
+                () -> {
+                    int[] next = new int[stock.size()];
+                    for (int i = 0; i < next.length; i++) {
+                        next[i] = stock.get(i).count + (i % 10 == round[0] % 10 ? 1 + round[0] : 0);
+                    }
+                    round[0]++;
+                    applied[0] = next;
+                },
+                () -> shown[0] = countsView.view(LogisticsWorkbenchMenu.applyCounts(stock, applied[0]),
+                        "", WorkbenchSort.QUANTITY, true));
         helper.assertTrue(shown[0].size() == stock.size(), "Stock list shows " + shown[0].size() + " entries");
         List<BigItemStack> fixed = new ArrayList<>(stock);
         view.view(fixed, "", WorkbenchSort.NAME, false);

@@ -32,6 +32,7 @@ import net.neoforged.neoforge.items.SlotItemHandler;
 import net.neoforged.neoforge.network.PacketDistributor;
 import tech.chazwarp923.refinedcreation.registry.ModMenus;
 import tech.chazwarp923.refinedcreation.workbench.WorkbenchPackets.StatusPayload;
+import tech.chazwarp923.refinedcreation.workbench.WorkbenchPackets.StockCountsPayload;
 import tech.chazwarp923.refinedcreation.workbench.WorkbenchPackets.StockPayload;
 
 /**
@@ -306,13 +307,36 @@ public class LogisticsWorkbenchMenu extends AbstractContainerMenu {
         lastStockSync = player.level().getGameTime();
         InventorySummary summary = workbench.getNetworkStock(false);
         boolean tuned = workbench.getFrequency() != null;
-        if (!force && tuned == lastSentTuned && isSameStock(summary, lastSentStock)) {
-            return;
+        StockChange change = force || tuned != lastSentTuned ? StockChange.ITEMS
+                : compareStock(summary, lastSentStock);
+        switch (change) {
+            case SAME -> {
+            }
+            case COUNTS -> {
+                // The client already has these items in this order; it only needs the new counts.
+                lastSentStock = lastSentStock.withCounts(summary);
+                PacketDistributor.sendToPlayer(serverPlayer,
+                        new StockCountsPayload(containerId, lastSentStock.counts()));
+            }
+            case ITEMS -> {
+                lastSentStock = snapshotStock(summary);
+                lastSentTuned = tuned;
+                PacketDistributor.sendToPlayer(serverPlayer,
+                        new StockPayload(containerId, tuned, lastSentStock.stacks()));
+            }
         }
-        StockSnapshot snapshot = snapshotStock(summary);
-        lastSentStock = snapshot;
-        lastSentTuned = tuned;
-        PacketDistributor.sendToPlayer(serverPlayer, new StockPayload(containerId, tuned, snapshot.stacks()));
+    }
+
+    /**
+     * How the network's stock differs from what the client was last sent.
+     */
+    public enum StockChange {
+        /** Nothing to send. */
+        SAME,
+        /** The same items in the same order, but some counts differ: a {@link StockCountsPayload} will do. */
+        COUNTS,
+        /** Items came, went or moved: the client needs the whole list. */
+        ITEMS
     }
 
     /**
@@ -332,6 +356,34 @@ public class LogisticsWorkbenchMenu extends AbstractContainerMenu {
 
         public List<BigItemStack> stacks() {
             return stacks;
+        }
+
+        /**
+         * @return every entry's count, in order
+         */
+        public int[] counts() {
+            int[] counts = new int[stacks.size()];
+            for (int i = 0; i < counts.length; i++) {
+                counts[i] = stacks.get(i).count;
+            }
+            return counts;
+        }
+
+        /**
+         * @param current a stock with the same items in the same order, as {@link StockChange#COUNTS} found
+         * @return this snapshot with the counts of {@code current}, sharing the copied stacks
+         */
+        public StockSnapshot withCounts(InventorySummary current) {
+            List<BigItemStack> entries = current.getStacks();
+            List<BigItemStack> updated = new ArrayList<>(entries.size());
+            List<ItemStack> newSources = new ArrayList<>(entries.size());
+            for (int i = 0; i < entries.size(); i++) {
+                BigItemStack sent = stacks.get(i);
+                int count = entries.get(i).count;
+                updated.add(count == sent.count ? sent : new BigItemStack(sent.stack, count));
+                newSources.add(entries.get(i).stack);
+            }
+            return new StockSnapshot(updated, newSources);
         }
 
         /**
@@ -362,27 +414,51 @@ public class LogisticsWorkbenchMenu extends AbstractContainerMenu {
      * @return whether {@code current} holds exactly the items and counts of {@code previous}
      */
     public static boolean isSameStock(InventorySummary current, @Nullable StockSnapshot previous) {
+        return compareStock(current, previous) == StockChange.SAME;
+    }
+
+    /**
+     * @return how {@code current} differs from {@code previous}
+     */
+    public static StockChange compareStock(InventorySummary current, @Nullable StockSnapshot previous) {
         if (previous == null) {
-            return false;
+            return StockChange.ITEMS;
         }
         List<BigItemStack> stacks = current.getStacks();
         if (stacks.size() != previous.stacks.size()) {
-            return false;
+            return StockChange.ITEMS;
         }
         // The network lists its stock in the same order from one sync to the next, so compare position by
         // position. The same stack object needs no component comparison.
+        boolean countsChanged = false;
         for (int i = 0; i < stacks.size(); i++) {
             BigItemStack entry = stacks.get(i);
             BigItemStack sent = previous.stacks.get(i);
             if (entry.stack != previous.sources.get(i)
                     && !ItemStack.isSameItemSameComponents(entry.stack, sent.stack)) {
-                return isSameStockInAnyOrder(stacks, previous);
+                return isSameStockInAnyOrder(stacks, previous) ? StockChange.SAME : StockChange.ITEMS;
             }
-            if (entry.count != sent.count) {
-                return false;
-            }
+            countsChanged |= entry.count != sent.count;
         }
-        return true;
+        return countsChanged ? StockChange.COUNTS : StockChange.SAME;
+    }
+
+    /**
+     * Applies a {@link StockCountsPayload} to the stock it was computed against.
+     *
+     * @return the new stock, sharing the stacks of {@code stock}, or {@code null} if the counts don't fit it
+     */
+    @Nullable
+    public static List<BigItemStack> applyCounts(List<BigItemStack> stock, int[] counts) {
+        if (stock.size() != counts.length) {
+            return null;
+        }
+        List<BigItemStack> updated = new ArrayList<>(counts.length);
+        for (int i = 0; i < counts.length; i++) {
+            BigItemStack entry = stock.get(i);
+            updated.add(entry.count == counts[i] ? entry : new BigItemStack(entry.stack, counts[i]));
+        }
+        return updated;
     }
 
     private static boolean isSameStockInAnyOrder(List<BigItemStack> stacks, StockSnapshot previous) {
