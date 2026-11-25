@@ -73,9 +73,15 @@ public class WorkbenchStockTests {
      */
     @GameTest(template = "empty_6x3x3")
     public static void unchangedStockIsNotResent(GameTestHelper helper) {
-        InventorySummary sent = summary(new ItemStack(Items.DIAMOND), 10, new ItemStack(Items.IRON_INGOT), 5);
+        LogisticsWorkbenchMenu.StockSnapshot sent = LogisticsWorkbenchMenu.snapshotStock(
+                summary(new ItemStack(Items.DIAMOND), 10, new ItemStack(Items.IRON_INGOT), 5));
 
-        helper.assertFalse(LogisticsWorkbenchMenu.isSameStock(sent, null), "Nothing sent yet");
+        helper.assertFalse(LogisticsWorkbenchMenu.isSameStock(
+                summary(new ItemStack(Items.DIAMOND), 10, new ItemStack(Items.IRON_INGOT), 5), null),
+                "Nothing sent yet");
+        helper.assertTrue(LogisticsWorkbenchMenu.isSameStock(
+                summary(new ItemStack(Items.DIAMOND), 10, new ItemStack(Items.IRON_INGOT), 5), sent),
+                "Same items and counts in the same order");
         helper.assertTrue(LogisticsWorkbenchMenu.isSameStock(
                 summary(new ItemStack(Items.IRON_INGOT), 5, new ItemStack(Items.DIAMOND), 10), sent),
                 "Same items and counts in another order");

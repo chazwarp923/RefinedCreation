@@ -100,7 +100,7 @@ public class LogisticsWorkbenchMenu extends AbstractContainerMenu {
     private long lastStockSync = Long.MIN_VALUE / 2;
     /** What the client was last sent, to skip periodic syncs that would change nothing. Server only. */
     @Nullable
-    private InventorySummary lastSentStock;
+    private StockSnapshot lastSentStock;
     private boolean lastSentTuned;
 
     /**
@@ -310,42 +310,85 @@ public class LogisticsWorkbenchMenu extends AbstractContainerMenu {
             return;
         }
         StockSnapshot snapshot = snapshotStock(summary);
-        lastSentStock = snapshot.summary();
+        lastSentStock = snapshot;
         lastSentTuned = tuned;
         PacketDistributor.sendToPlayer(serverPlayer, new StockPayload(containerId, tuned, snapshot.stacks()));
     }
 
     /**
-     * What a stock sync sends: the stack list for the packet, and a copy of the summary to compare the next sync
-     * against. Both are copies, because Create can change a cached summary after returning it.
+     * What a stock sync sent: the stack list for the packet, copied because Create can change a cached summary
+     * after returning it, and the stacks it was copied from, to recognise them on the next sync.
      */
-    public record StockSnapshot(List<BigItemStack> stacks, InventorySummary summary) {
+    public static final class StockSnapshot {
+        private final List<BigItemStack> stacks;
+        private final List<ItemStack> sources;
+        @Nullable
+        private InventorySummary summary;
+
+        private StockSnapshot(List<BigItemStack> stacks, List<ItemStack> sources) {
+            this.stacks = stacks;
+            this.sources = sources;
+        }
+
+        public List<BigItemStack> stacks() {
+            return stacks;
+        }
+
+        /**
+         * @return the sent stock as a summary, for looking items up by stack. Built on first use, because
+         * comparing in order usually settles the question without it.
+         */
+        private InventorySummary summary() {
+            if (summary == null) {
+                summary = new InventorySummary();
+                summary.addAllBigItemStacks(stacks);
+            }
+            return summary;
+        }
     }
 
     public static StockSnapshot snapshotStock(InventorySummary summary) {
-        List<BigItemStack> stacks = new ArrayList<>();
-        InventorySummary sent = new InventorySummary();
-        for (BigItemStack entry : summary.getStacks()) {
-            ItemStack stack = entry.stack.copyWithCount(1);
-            stacks.add(new BigItemStack(stack, entry.count));
-            sent.add(stack, entry.count);
+        List<BigItemStack> entries = summary.getStacks();
+        List<BigItemStack> stacks = new ArrayList<>(entries.size());
+        List<ItemStack> sources = new ArrayList<>(entries.size());
+        for (BigItemStack entry : entries) {
+            stacks.add(new BigItemStack(entry.stack.copyWithCount(1), entry.count));
+            sources.add(entry.stack);
         }
-        return new StockSnapshot(stacks, sent);
+        return new StockSnapshot(stacks, sources);
     }
 
     /**
      * @return whether {@code current} holds exactly the items and counts of {@code previous}
      */
-    public static boolean isSameStock(InventorySummary current, @Nullable InventorySummary previous) {
+    public static boolean isSameStock(InventorySummary current, @Nullable StockSnapshot previous) {
         if (previous == null) {
             return false;
         }
         List<BigItemStack> stacks = current.getStacks();
-        if (stacks.size() != previous.getStacks().size()) {
+        if (stacks.size() != previous.stacks.size()) {
             return false;
         }
+        // The network lists its stock in the same order from one sync to the next, so compare position by
+        // position. The same stack object needs no component comparison.
+        for (int i = 0; i < stacks.size(); i++) {
+            BigItemStack entry = stacks.get(i);
+            BigItemStack sent = previous.stacks.get(i);
+            if (entry.stack != previous.sources.get(i)
+                    && !ItemStack.isSameItemSameComponents(entry.stack, sent.stack)) {
+                return isSameStockInAnyOrder(stacks, previous);
+            }
+            if (entry.count != sent.count) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean isSameStockInAnyOrder(List<BigItemStack> stacks, StockSnapshot previous) {
+        InventorySummary sent = previous.summary();
         for (BigItemStack entry : stacks) {
-            if (previous.getCountOf(entry.stack) != entry.count) {
+            if (sent.getCountOf(entry.stack) != entry.count) {
                 return false;
             }
         }

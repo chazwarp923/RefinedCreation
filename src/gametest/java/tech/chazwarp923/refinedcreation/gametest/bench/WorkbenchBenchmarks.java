@@ -5,6 +5,7 @@ import java.util.List;
 
 import com.simibubi.create.content.logistics.BigItemStack;
 import com.simibubi.create.content.logistics.packager.InventorySummary;
+import com.simibubi.create.content.logistics.packagerLink.LogisticsManager;
 
 import io.netty.buffer.Unpooled;
 import net.minecraft.gametest.framework.GameTestHelper;
@@ -39,8 +40,19 @@ final class WorkbenchBenchmarks {
         // W1: twice a second per open workbench, the menu checks whether the stock changed.
         boolean[] same = new boolean[1];
         bench.measure("W1", "Stock sync check, stock unchanged", 10, 100, null,
-                () -> same[0] = LogisticsWorkbenchMenu.isSameStock(summary, sent.summary()));
+                () -> same[0] = LogisticsWorkbenchMenu.isSameStock(summary, sent));
         helper.assertTrue(same[0], "Unchanged stock was reported as changed");
+        // The same, after the network summary was rebuilt: the stacks are new objects with the same contents.
+        InventorySummary[] rebuilt = new InventorySummary[1];
+        bench.measure("W1b", "Stock sync check, summary rebuilt but stock unchanged", 5, 50,
+                () -> {
+                    net.touchNetwork();
+                    net.nextTick();
+                    LogisticsManager.SUMMARIES.invalidateAll();
+                    rebuilt[0] = workbench.getNetworkStock(false);
+                },
+                () -> same[0] = LogisticsWorkbenchMenu.isSameStock(rebuilt[0], sent));
+        helper.assertTrue(same[0], "Rebuilt but unchanged stock was reported as changed");
 
         // W2: when it did change, the menu copies the stock and sends it all.
         int[] bytes = new int[1];
