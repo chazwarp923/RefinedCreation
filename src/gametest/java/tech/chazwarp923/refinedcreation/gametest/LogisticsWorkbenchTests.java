@@ -279,6 +279,59 @@ public class LogisticsWorkbenchTests {
     }
 
     /**
+     * After a recipe transfer leaves a slot empty to wait for a network delivery, pressing Order still orders
+     * that ingredient instead of forgetting it. A slot the player fills and empties by hand is forgotten as before.
+     */
+    @GameTest(template = "empty_6x3x3", timeoutTicks = 200)
+    public static void orderKeepsSlotsWaitingOnNetwork(GameTestHelper helper) {
+        ChestBlockEntity chest = chestNetwork(helper, new ItemStack(Items.OAK_PLANKS, 32));
+        Player player = helper.makeMockPlayer(GameType.SURVIVAL);
+        player.getInventory().add(new ItemStack(Items.COBBLESTONE, 1));
+
+        // Cobblestone (on hand) in slot 0, planks (network only) in slot 3.
+        List<List<ItemStack>> options = new ArrayList<>();
+        for (int i = 0; i < 9; i++) {
+            options.add(i == 0 ? List.of(new ItemStack(Items.COBBLESTONE))
+                    : i == 3 ? List.of(new ItemStack(Items.OAK_PLANKS)) : List.of());
+        }
+
+        helper.startSequence()
+                .thenWaitUntil(() -> helper.assertTrue(
+                        packagerAt(helper, CHEST_PACKAGER).targetInventory.hasInventory(),
+                        "Chest packager has not found the chest"))
+                .thenExecute(() -> {
+                    tuneToChest(helper);
+                    LogisticsWorkbenchBlockEntity workbench = workbench(helper);
+                    workbench.transferRecipe(player, options, false);
+                    helper.assertTrue(workbench.getCraftGrid().getItem(0).is(Items.COBBLESTONE),
+                            "Cobblestone should be placed in slot 0");
+                    helper.assertTrue(workbench.getCraftGrid().getItem(3).isEmpty(),
+                            "The plank slot should wait for the delivery");
+                    helper.assertTrue(chest.getItem(0).getCount() == 31,
+                            "The transfer should order 1 plank, chest holds " + chest.getItem(0).getCount());
+                })
+                .thenIdle(2)
+                .thenExecute(() -> {
+                    LogisticsWorkbenchBlockEntity workbench = workbench(helper);
+                    workbench.orderPattern(2);
+                    helper.assertTrue(workbench.getPattern().get(3).is(Items.OAK_PLANKS),
+                            "Order should keep the plank slot in the pattern");
+                    helper.assertTrue(chest.getItem(0).getCount() == 29,
+                            "Order should order planks for 2 crafts, chest holds " + chest.getItem(0).getCount());
+
+                    // Filling the slot by hand ends the wait, so emptying it again drops it from the pattern.
+                    workbench.getCraftGrid().setItem(3, new ItemStack(Items.OAK_PLANKS));
+                    workbench.getCraftGrid().setItem(3, ItemStack.EMPTY);
+                    workbench.orderPattern(1);
+                    helper.assertTrue(workbench.getPattern().get(3).isEmpty(),
+                            "A slot emptied by hand should leave the pattern");
+                    helper.assertTrue(workbench.getPattern().get(0).is(Items.COBBLESTONE),
+                            "The cobblestone slot should stay in the pattern");
+                })
+                .thenSucceed();
+    }
+
+    /**
      * A chest on a Create network through a Packager and Stock Link, plus an untuned workbench.
      */
     private static ChestBlockEntity chestNetwork(GameTestHelper helper, ItemStack contents) {

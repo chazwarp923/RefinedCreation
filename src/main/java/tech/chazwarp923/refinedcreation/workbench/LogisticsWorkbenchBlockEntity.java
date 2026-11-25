@@ -73,6 +73,12 @@ public class LogisticsWorkbenchBlockEntity extends BlockEntity implements MenuPr
     private final NonNullList<ItemStack> grid = NonNullList.withSize(GRID_SLOTS, ItemStack.EMPTY);
     /** One of each ingredient of the last pattern crafted or ordered. Used to refill the grid. */
     private final NonNullList<ItemStack> pattern = NonNullList.withSize(GRID_SLOTS, ItemStack.EMPTY);
+    /**
+     * Grid slots that a recipe transfer left empty because their ingredient has to come from the network. Their
+     * pattern entry is kept when the pattern is remembered from the grid, so pressing Order before the delivery
+     * arrives doesn't forget them. A slot stops waiting once it holds an item, or when the grid is cleared.
+     */
+    private final boolean[] awaitingNetwork = new boolean[GRID_SLOTS];
     private final WorkbenchCraftingContainer craftGrid = new WorkbenchCraftingContainer(grid, this::onGridChanged);
     private final ItemStackHandler buffer = new ItemStackHandler(BUFFER_SLOTS) {
         @Override
@@ -165,6 +171,11 @@ public class LogisticsWorkbenchBlockEntity extends BlockEntity implements MenuPr
         if (batchingGridChanges) {
             return;
         }
+        for (int i = 0; i < GRID_SLOTS; i++) {
+            if (!grid.get(i).isEmpty()) {
+                awaitingNetwork[i] = false;
+            }
+        }
         setChanged();
         for (LogisticsWorkbenchMenu menu : openMenus) {
             menu.slotsChanged(craftGrid);
@@ -172,7 +183,8 @@ public class LogisticsWorkbenchBlockEntity extends BlockEntity implements MenuPr
     }
 
     /**
-     * Records the grid's current layout (one of each item) as the pattern to refill and order.
+     * Records the grid's current layout (one of each item) as the pattern to refill and order. Empty slots that
+     * are still waiting for a network delivery keep their pattern entry.
      */
     void rememberPattern() {
         if (craftGrid.isEmpty()) {
@@ -180,7 +192,11 @@ public class LogisticsWorkbenchBlockEntity extends BlockEntity implements MenuPr
         }
         for (int i = 0; i < GRID_SLOTS; i++) {
             ItemStack stack = grid.get(i);
-            pattern.set(i, stack.isEmpty() ? ItemStack.EMPTY : stack.copyWithCount(1));
+            if (!stack.isEmpty()) {
+                pattern.set(i, stack.copyWithCount(1));
+            } else if (!awaitingNetwork[i]) {
+                pattern.set(i, ItemStack.EMPTY);
+            }
         }
         setChanged();
     }
@@ -232,6 +248,7 @@ public class LogisticsWorkbenchBlockEntity extends BlockEntity implements MenuPr
             moveGridToStorage(player);
             for (int i = 0; i < GRID_SLOTS; i++) {
                 pattern.set(i, ItemStack.EMPTY);
+                awaitingNetwork[i] = false;
             }
         } finally {
             batchingGridChanges = false;
@@ -291,6 +308,7 @@ public class LogisticsWorkbenchBlockEntity extends BlockEntity implements MenuPr
             moveGridToStorage(player);
             for (int i = 0; i < GRID_SLOTS; i++) {
                 pattern.set(i, ItemStack.EMPTY);
+                awaitingNetwork[i] = false;
                 List<ItemStack> choices = i < options.size() ? options.get(i) : List.of();
                 if (choices.isEmpty()) {
                     continue;
@@ -308,6 +326,8 @@ public class LogisticsWorkbenchBlockEntity extends BlockEntity implements MenuPr
                         break;
                     }
                 }
+                // Either way the slot stays empty for now but keeps its pattern entry.
+                awaitingNetwork[i] = true;
                 if (fromNetwork != null) {
                     pattern.set(i, fromNetwork.copyWithCount(1));
                     addTo(toOrder, fromNetwork, 1);
@@ -663,6 +683,10 @@ public class LogisticsWorkbenchBlockEntity extends BlockEntity implements MenuPr
         pattern.clear();
         ContainerHelper.loadAllItems(tag.getCompound("Grid"), grid, registries);
         ContainerHelper.loadAllItems(tag.getCompound("Pattern"), pattern, registries);
+        int awaiting = tag.getInt("AwaitingNetwork");
+        for (int i = 0; i < GRID_SLOTS; i++) {
+            awaitingNetwork[i] = (awaiting & (1 << i)) != 0;
+        }
         loadHandler(buffer, tag.getCompound("Buffer"), registries);
         loadHandler(returns, tag.getCompound("Returns"), registries);
     }
@@ -702,6 +726,13 @@ public class LogisticsWorkbenchBlockEntity extends BlockEntity implements MenuPr
         tag.putString("ReturnAddress", returnAddress);
         tag.put("Grid", ContainerHelper.saveAllItems(new CompoundTag(), grid, registries));
         tag.put("Pattern", ContainerHelper.saveAllItems(new CompoundTag(), pattern, registries));
+        int awaiting = 0;
+        for (int i = 0; i < GRID_SLOTS; i++) {
+            if (awaitingNetwork[i]) {
+                awaiting |= 1 << i;
+            }
+        }
+        tag.putInt("AwaitingNetwork", awaiting);
         tag.put("Buffer", buffer.serializeNBT(registries));
         tag.put("Returns", returns.serializeNBT(registries));
     }
