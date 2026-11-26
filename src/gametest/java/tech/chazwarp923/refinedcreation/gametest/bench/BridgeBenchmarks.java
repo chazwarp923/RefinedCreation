@@ -5,6 +5,8 @@ import java.util.List;
 
 import org.apache.commons.lang3.mutable.MutableBoolean;
 
+import com.refinedmods.refinedstorage.api.core.Action;
+import com.refinedmods.refinedstorage.api.storage.Actor;
 import com.refinedmods.refinedstorage.common.support.resource.ItemResource;
 import com.simibubi.create.content.logistics.BigItemStack;
 import com.simibubi.create.content.logistics.box.PackageItem;
@@ -67,29 +69,41 @@ final class BridgeBenchmarks {
         // B3: a big single-item order, e.g. 2,000 diamonds from a Stock Keeper.
         int[] packaged = new int[1];
         long diamondsBefore = net.storage().get(new ItemResource(Items.DIAMOND));
-        int b3Runs = 3 + 20;
+        // Bench runs the order as many times as its time budget needs, so count them.
+        int[] b3Runs = new int[1];
         bench.measure("B3", "Package a 2,000-item order of one item", 3, 20,
                 () -> {
                     LargeNetwork.clearOutgoing(packager);
                     net.nextTick();
                 },
-                () -> packaged[0] = packageOrder(packager, List.of(request(diamond, 2000))));
+                () -> {
+                    packaged[0] = packageOrder(packager, List.of(request(diamond, 2000)));
+                    b3Runs[0]++;
+                });
         helper.assertTrue(packaged[0] == 2000, "Packaged " + packaged[0] + " of 2,000 diamonds");
         long diamondsTaken = diamondsBefore - net.storage().get(new ItemResource(Items.DIAMOND));
-        helper.assertTrue(diamondsTaken == 2000L * b3Runs, "Network lost " + diamondsTaken + " diamonds");
+        helper.assertTrue(diamondsTaken == 2000L * b3Runs[0], "Network lost " + diamondsTaken + " diamonds over "
+                + b3Runs[0] + " orders");
 
         // B4: an order of many different items, e.g. a factory restock.
         List<ItemStack> mixed = new ArrayList<>();
         for (ItemResource type : net.stockedTypes()) {
             if (mixed.size() < 20 && type.item().getDefaultMaxStackSize() == 64
-                    && net.storage().get(type) >= 100L * 30) {
+                    && net.storage().get(type) >= 100L) {
                 mixed.add(type.toItemStack(1));
             }
         }
         helper.assertTrue(mixed.size() == 20, "Found only " + mixed.size() + " well-stocked item types");
+        // Bench runs the order as many times as its time budget needs, so the setup puts each order's items back.
+        boolean[] ordered = new boolean[1];
         bench.measure("B4", "Package a 20-item-type order (100 of each)", 3, 20,
                 () -> {
                     LargeNetwork.clearOutgoing(packager);
+                    if (ordered[0]) {
+                        for (ItemStack stack : mixed) {
+                            net.storage().insert(ItemResource.ofItemStack(stack), 100, Action.EXECUTE, Actor.EMPTY);
+                        }
+                    }
                     net.nextTick();
                 },
                 () -> {
@@ -98,6 +112,7 @@ final class BridgeBenchmarks {
                         requests.add(request(stack, 100));
                     }
                     packaged[0] = packageOrder(packager, requests);
+                    ordered[0] = true;
                 });
         helper.assertTrue(packaged[0] == 2000, "Packaged " + packaged[0] + " of 2,000 mixed items");
 

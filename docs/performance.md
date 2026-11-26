@@ -28,6 +28,11 @@ runs' medians:
   Create for large bridge networks"
 
 Times vary by up to about 1.5× between runs on the test machine, so treat changes under about 1.2× as noise.
+
+This table was measured with fixed warm-up and iteration counts, which ended the sub-millisecond benchmarks
+before the JIT had finished compiling them. Their figures here (B5, B6, B7a, B7b, W6b and D1) are 2–4× higher
+than with the time-based warm-up the suite now uses, which runs each phase for at least 200 ms. They still compare
+fairly with each other, since every build was measured the same way, but not with newer runs.
 Allocations are bytes per operation from the first run of each build. A dash means the benchmark didn't exist in
 that build. The baseline's W6a rebuilt the list from scratch, so it compares with both W6a and W6a1.
 
