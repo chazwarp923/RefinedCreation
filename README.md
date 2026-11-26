@@ -31,6 +31,11 @@ A crafting table that works from a **Create logistics network**, in the style of
 - Send leftovers back to the network from the return shelf.
 - **JEI support:** fill the grid from a recipe with "+", and keep the workbench's search in sync with JEI's.
 
+## Built for big networks
+Refined Creation is benchmarked on a Refined Storage network with 10,000 item types, 32 storage blocks and about 300
+patterns. On that network, packaging an order through the bridge or ordering from the Logistics Workbench takes under
+10 milliseconds. See the [benchmark results](docs/performance.md).
+
 ## Getting started
 Every block has a **Ponder** scene: hold **W** while hovering over it in your inventory or JEI to see how to set it
 up.
@@ -46,6 +51,7 @@ up.
 ```
 ./gradlew build              # jar in build/libs
 ./gradlew runGameTestServer  # integration tests: bridge, dispatcher, Create orders crafted by RS, Logistics Workbench
+./gradlew runBenchmarks       # performance benchmarks on a large RS network, results in build/benchmarks
 ```
 
 Dependencies: Create 6.0.10+, Refined Storage 2.0.9+. JEI is optional (recipe transfer into the Logistics Workbench).
